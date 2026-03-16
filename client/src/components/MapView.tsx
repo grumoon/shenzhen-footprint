@@ -17,21 +17,21 @@ export function MapView() {
   const polygonsRef = useRef<any[]>([]);
   const districtPolygonsRef = useRef<any[]>([]);
 
-  // 深圳各区配色（加深版）
+  // 深圳各区配色 — 10色高对比方案，确保相邻区颜色差异明显
   const districtColors: Record<string, string> = {
-    '福田区': '#D32F2F',
-    '罗湖区': '#00897B',
-    '南山区': '#1976D2',
-    '盐田区': '#2E7D32',
-    '宝安区': '#F9A825',
-    '龙岗区': '#8E24AA',
-    '龙华区': '#00796B',
-    '坪山区': '#E65100',
-    '光明区': '#388E3C',
-    '大鹏新区': '#1565C0',
+    '福田区': '#D32F2F',   // 红
+    '罗湖区': '#7B1FA2',   // 紫
+    '南山区': '#1565C0',   // 蓝
+    '盐田区': '#00838F',   // 青
+    '宝安区': '#E65100',   // 橙
+    '龙岗区': '#2E7D32',   // 绿
+    '龙华区': '#AD1457',   // 玫红
+    '坪山区': '#4527A0',   // 靛蓝
+    '光明区': '#F9A825',   // 金黄
+    '大鹏新区': '#00695C', // 墨绿
   };
 
-  // 加载行政区划边界（区级 / 街道级 / 关闭）
+  // 加载行政区划边界（区级 / 街道级 / 社区级 / 关闭）
   useEffect(() => {
     if (!map || !loaded) return;
 
@@ -44,112 +44,107 @@ export function MapView() {
     const AMap = (window as any).AMap;
     let cancelled = false;
 
-    const loadDistricts = () => {
+    const addPolygon = (feature: any, colorKey: string, opts: {
+      fillOpacity: number; strokeWeight: number; strokeOpacity: number;
+      strokeStyle: string; zIndex: number;
+    }) => {
+      const color = districtColors[colorKey] || '#999';
+      const geometry = feature.geometry;
+      if (!geometry) return;
+
+      const coords = geometry.type === 'MultiPolygon'
+        ? geometry.coordinates
+        : [geometry.coordinates];
+
+      coords.forEach((polygonCoords: number[][][]) => {
+        const path = polygonCoords.map((ring: number[][]) =>
+          ring.map((coord: number[]) => new AMap.LngLat(coord[0], coord[1]))
+        );
+
+        const polygon = new AMap.Polygon({
+          path,
+          fillColor: color,
+          fillOpacity: opts.fillOpacity,
+          strokeColor: color,
+          strokeWeight: opts.strokeWeight,
+          strokeOpacity: opts.strokeOpacity,
+          strokeStyle: opts.strokeStyle,
+          zIndex: opts.zIndex,
+        });
+        map.add(polygon);
+        districtPolygonsRef.current.push(polygon);
+      });
+    };
+
+    const addLabel = (text: string, pos: number[], style: Record<string, string>, zIndex: number) => {
+      const label = new AMap.Text({
+        text,
+        position: new AMap.LngLat(pos[0], pos[1]),
+        style,
+        zIndex,
+      });
+      map.add(label);
+      districtPolygonsRef.current.push(label);
+    };
+
+    const loadDistricts = (isBackground: boolean) => {
       return fetch('/shenzhen-districts.geojson')
         .then((res) => res.json())
         .then((geojson: any) => {
           if (cancelled) return;
-
           const features = geojson.features || [];
           features.forEach((feature: any) => {
             const name = feature.properties?.name;
             const color = districtColors[name] || '#999';
-            const geometry = feature.geometry;
-            if (!geometry) return;
 
-            const coords = geometry.type === 'MultiPolygon'
-              ? geometry.coordinates
-              : [geometry.coordinates];
-
-            coords.forEach((polygonCoords: number[][][]) => {
-              const path = polygonCoords.map((ring: number[][]) =>
-                ring.map((coord: number[]) => new AMap.LngLat(coord[0], coord[1]))
-              );
-
-              const polygon = new AMap.Polygon({
-                path,
-                fillColor: color,
-                fillOpacity: districtLevel === 'street' ? 0.06 : 0.15,
-                strokeColor: color,
-                strokeWeight: districtLevel === 'street' ? 2 : 2.5,
-                strokeOpacity: districtLevel === 'street' ? 0.5 : 0.85,
-                strokeStyle: 'dashed',
-                zIndex: 1,
-              });
-              map.add(polygon);
-              districtPolygonsRef.current.push(polygon);
+            addPolygon(feature, name, {
+              fillOpacity: isBackground ? 0.04 : 0.15,
+              strokeWeight: isBackground ? 1.5 : 2.5,
+              strokeOpacity: isBackground ? 0.4 : 0.85,
+              strokeStyle: 'dashed',
+              zIndex: 1,
             });
 
-            // 区名标注
             const labelPos = feature.properties?.centroid || feature.properties?.center;
             if (labelPos) {
-              const text = new AMap.Text({
-                text: name,
-                position: new AMap.LngLat(labelPos[0], labelPos[1]),
-                style: {
-                  'font-size': '13px',
-                  'font-weight': 'bold',
-                  'color': color,
-                  'background': 'rgba(255,255,255,0.9)',
-                  'border': `1.5px solid ${color}`,
-                  'border-radius': '4px',
-                  'padding': '2px 8px',
-                  'text-align': 'center',
-                },
-                zIndex: districtLevel === 'street' ? 3 : 2,
-              });
-              map.add(text);
-              districtPolygonsRef.current.push(text);
+              addLabel(name, labelPos, {
+                'font-size': isBackground ? '12px' : '13px',
+                'font-weight': 'bold',
+                'color': color,
+                'background': `rgba(255,255,255,${isBackground ? 0.7 : 0.9})`,
+                'border': `1.5px solid ${color}`,
+                'border-radius': '4px',
+                'padding': '2px 8px',
+                'text-align': 'center',
+              }, isBackground ? 4 : 2);
             }
           });
         });
     };
 
-    const loadStreets = () => {
+    const loadStreets = (isBackground: boolean) => {
       return fetch('/shenzhen-streets.geojson')
         .then((res) => res.json())
         .then((geojson: any) => {
           if (cancelled) return;
-
           const features = geojson.features || [];
           features.forEach((feature: any) => {
             const name = feature.properties?.name;
             const district = feature.properties?.district;
-            const color = districtColors[district] || '#999';
-            const geometry = feature.geometry;
-            if (!geometry) return;
 
-            const coords = geometry.type === 'MultiPolygon'
-              ? geometry.coordinates
-              : [geometry.coordinates];
-
-            coords.forEach((polygonCoords: number[][][]) => {
-              const path = polygonCoords.map((ring: number[][]) =>
-                ring.map((coord: number[]) => new AMap.LngLat(coord[0], coord[1]))
-              );
-
-              const polygon = new AMap.Polygon({
-                path,
-                fillColor: color,
-                fillOpacity: 0.08,
-                strokeColor: color,
-                strokeWeight: 1.5,
-                strokeOpacity: 0.6,
-                strokeStyle: 'solid',
-                zIndex: 2,
-              });
-              map.add(polygon);
-              districtPolygonsRef.current.push(polygon);
+            addPolygon(feature, district, {
+              fillOpacity: isBackground ? 0.04 : 0.08,
+              strokeWeight: isBackground ? 1 : 1.5,
+              strokeOpacity: isBackground ? 0.3 : 0.6,
+              strokeStyle: 'solid',
+              zIndex: 2,
             });
 
-            // 街道名标注
-            const labelPos = feature.properties?.centroid || feature.properties?.center;
-            if (labelPos) {
-              const shortName = name.replace('街道', '');
-              const text = new AMap.Text({
-                text: shortName,
-                position: new AMap.LngLat(labelPos[0], labelPos[1]),
-                style: {
+            if (!isBackground) {
+              const labelPos = feature.properties?.centroid || feature.properties?.center;
+              if (labelPos) {
+                const shortName = name.replace('街道', '');
+                addLabel(shortName, labelPos, {
                   'font-size': '11px',
                   'color': '#555',
                   'background': 'rgba(255,255,255,0.8)',
@@ -157,21 +152,56 @@ export function MapView() {
                   'border-radius': '3px',
                   'padding': '1px 5px',
                   'text-align': 'center',
-                },
-                zIndex: 2,
-              });
-              map.add(text);
-              districtPolygonsRef.current.push(text);
+                }, 3);
+              }
+            }
+          });
+        });
+    };
+
+    const loadCommunities = () => {
+      return fetch('/shenzhen-communities.geojson')
+        .then((res) => res.json())
+        .then((geojson: any) => {
+          if (cancelled) return;
+          const features = geojson.features || [];
+          features.forEach((feature: any) => {
+            const name = feature.properties?.name;
+            const district = feature.properties?.district;
+
+            addPolygon(feature, district, {
+              fillOpacity: 0.06,
+              strokeWeight: 1,
+              strokeOpacity: 0.5,
+              strokeStyle: 'solid',
+              zIndex: 3,
+            });
+
+            // 社区名标注
+            const labelPos = feature.properties?.centroid || feature.properties?.center;
+            if (labelPos) {
+              const shortName = name.replace('社区', '');
+              addLabel(shortName, labelPos, {
+                'font-size': '10px',
+                'color': '#777',
+                'background': 'rgba(255,255,255,0.75)',
+                'border': '1px solid #ddd',
+                'border-radius': '2px',
+                'padding': '0px 3px',
+                'text-align': 'center',
+              }, 3);
             }
           });
         });
     };
 
     if (districtLevel === 'district') {
-      loadDistricts().catch((err) => console.error('加载区级数据失败:', err));
+      loadDistricts(false).catch((err) => console.error('加载区级数据失败:', err));
     } else if (districtLevel === 'street') {
-      // 街道模式：先加载区级边界（淡化），再叠加街道边界
-      Promise.all([loadDistricts(), loadStreets()])
+      Promise.all([loadDistricts(true), loadStreets(false)])
+        .catch((err) => console.error('加载行政区划数据失败:', err));
+    } else if (districtLevel === 'community') {
+      Promise.all([loadDistricts(true), loadStreets(true), loadCommunities()])
         .catch((err) => console.error('加载行政区划数据失败:', err));
     }
 
