@@ -37,22 +37,34 @@ export function MapView() {
     if (!map || !loaded) return;
 
     const AMap = (window as any).AMap;
-    const districtSearch = new AMap.DistrictSearch({
-      level: 'district',
-      extensions: 'all', // 返回行政区边界坐标
-      subdistrict: 1,    // 返回下一级
-    });
 
-    // 搜索深圳市，获取各区边界
-    districtSearch.search('深圳市', (status: string, result: any) => {
-      if (status !== 'complete') return;
+    // 深圳各区名称列表，逐个查询边界
+    const districtNames = Object.keys(districtColors);
 
-      const districts = result.districtList?.[0]?.districtList || [];
+    districtNames.forEach((name) => {
+      const color = districtColors[name];
 
-      districts.forEach((district: any) => {
-        const name = district.name;
-        const color = districtColors[name] || '#999';
-        const boundaries = district.boundaries || [];
+      // 每个区单独查询，extensions: 'all' 才会返回 boundaries
+      const searcher = new AMap.DistrictSearch({
+        level: 'district',
+        extensions: 'all',
+        subdistrict: 0,
+      });
+
+      searcher.search(name, (status: string, result: any) => {
+        if (status !== 'complete') {
+          console.warn(`行政区划查询失败: ${name}`, status, result);
+          return;
+        }
+
+        const districtData = result.districtList?.[0];
+        if (!districtData) return;
+
+        const boundaries = districtData.boundaries || [];
+        if (boundaries.length === 0) {
+          console.warn(`${name} 没有边界数据`);
+          return;
+        }
 
         boundaries.forEach((boundary: any) => {
           const polygon = new AMap.Polygon({
@@ -67,30 +79,29 @@ export function MapView() {
           });
           map.add(polygon);
           districtPolygonsRef.current.push(polygon);
-
-          // 区名标注 — 在区域中心显示
-          const bounds = polygon.getBounds();
-          if (bounds) {
-            const center = bounds.getCenter();
-            const text = new AMap.Text({
-              text: name,
-              position: [center.getLng(), center.getLat()],
-              style: {
-                'font-size': '13px',
-                'font-weight': 'bold',
-                'color': color,
-                'background': 'rgba(255,255,255,0.85)',
-                'border': `1px solid ${color}`,
-                'border-radius': '4px',
-                'padding': '2px 8px',
-                'text-align': 'center',
-              },
-              zIndex: 2,
-            });
-            map.add(text);
-            districtPolygonsRef.current.push(text);
-          }
         });
+
+        // 区名标注 — 用区的 center 坐标
+        const center = districtData.center;
+        if (center) {
+          const text = new AMap.Text({
+            text: name,
+            position: [center.lng, center.lat],
+            style: {
+              'font-size': '13px',
+              'font-weight': 'bold',
+              'color': color,
+              'background': 'rgba(255,255,255,0.85)',
+              'border': `1px solid ${color}`,
+              'border-radius': '4px',
+              'padding': '2px 8px',
+              'text-align': 'center',
+            },
+            zIndex: 2,
+          });
+          map.add(text);
+          districtPolygonsRef.current.push(text);
+        }
       });
     });
 
