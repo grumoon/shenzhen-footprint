@@ -95,7 +95,7 @@ export function Sidebar({ filter, onFilterChange, footprintCount, districtLevel,
         </div>
       </div>
 
-      <div>
+      <div style={{ marginTop: 'auto' }}>
         <div style={{ fontSize: 13, color: '#666', marginBottom: 6, fontWeight: 600 }}>行政区划</div>
         <div style={{ display: 'flex', gap: 6 }}>
           {DISTRICT_LEVELS.map((opt) => (

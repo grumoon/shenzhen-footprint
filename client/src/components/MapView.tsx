@@ -2,20 +2,53 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAMap } from '../hooks/useAMap';
 import { api } from '../utils/api';
 import type { Footprint } from '../types';
-import { Sidebar } from './Sidebar';
-import type { DistrictLevel } from './Sidebar';
+import { TopBar } from './TopBar';
+import { DistrictControl } from './DistrictControl';
+import type { DistrictLevel } from './DistrictControl';
 import { DetailPanel } from './DetailPanel';
+
+// 公园类型颜色
+const PARK_COLORS: Record<string, string> = {
+  '自然公园': '#2E7D32',
+  '城市公园': '#1565C0',
+  '社区公园': '#7B1FA2',
+};
+
+// 山峰颜色（按海拔）
+function getPeakColor(ele: number): string {
+  if (ele >= 800) return '#c62828';
+  if (ele >= 600) return '#e65100';
+  if (ele >= 400) return '#f9a825';
+  return '#8B4513';
+}
 
 export function MapView() {
   const { map, loaded } = useAMap('map-container');
   const [footprints, setFootprints] = useState<Footprint[]>([]);
   const [selectedFootprint, setSelectedFootprint] = useState<Footprint | null>(null);
-  const [filter, setFilter] = useState<{ category?: string; status?: string }>({});
-  const [districtLevel, setDistrictLevel] = useState<DistrictLevel>('district');
+  const [activeCategories, setActiveCategories] = useState<Set<string>>(new Set());
+  const [districtLevel, setDistrictLevel] = useState<DistrictLevel>('off');
   const markersRef = useRef<any[]>([]);
   const polylinesRef = useRef<any[]>([]);
   const polygonsRef = useRef<any[]>([]);
   const districtPolygonsRef = useRef<any[]>([]);
+  // 数据图层引用
+  const parkLayerRef = useRef<any[]>([]);
+  const peakLayerRef = useRef<any[]>([]);
+  // 弹窗引用
+  const infoWindowRef = useRef<any>(null);
+
+  const handleToggleCategory = useCallback((key: string) => {
+    setActiveCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
 
   // 深圳各区配色 — 10色高对比方案，确保相邻区颜色差异明显
   const districtColors: Record<string, string> = {
@@ -29,14 +62,6 @@ export function MapView() {
     '坪山区': '#4527A0',   // 靛蓝
     '光明区': '#F9A825',   // 金黄
     '大鹏新区': '#00695C', // 墨绿
-  };
-
-  // 颜色工具：将 hex 转为 rgba
-  const hexToRgba = (hex: string, alpha: number) => {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    return `rgba(${r},${g},${b},${alpha})`;
   };
 
   // 加载行政区划边界（区级 / 街道级 / 关闭）
@@ -153,10 +178,10 @@ export function MapView() {
 
             // 交替深浅：偶数街道填充深一些，奇数浅一些
             addPolygon(feature, color, {
-              fillOpacity: isEven ? 0.18 : 0.08,
-              strokeWeight: 2,
-              strokeOpacity: 0.8,
-              strokeColor: '#444',
+              fillOpacity: isEven ? 0.14 : 0.06,
+              strokeWeight: 1.5,
+              strokeOpacity: 0.6,
+              strokeColor: '#555',
               strokeStyle: 'solid',
               zIndex: 2,
             });
@@ -193,18 +218,215 @@ export function MapView() {
     };
   }, [map, loaded, districtLevel]);
 
+  // ======= 公园图层 =======
+  useEffect(() => {
+    if (!map || !loaded) return;
+
+    // 清除旧图层
+    parkLayerRef.current.forEach((o) => map.remove(o));
+    parkLayerRef.current = [];
+
+    if (!activeCategories.has('park')) return;
+
+    const AMap = (window as any).AMap;
+    let cancelled = false;
+
+    fetch('/shenzhen-parks.geojson')
+      .then((res) => res.json())
+      .then((geojson: any) => {
+        if (cancelled) return;
+
+        const features = geojson.features || [];
+        features.forEach((feature: any) => {
+          const props = feature.properties;
+          const geom = feature.geometry;
+          const parkType = props.park_type || '社区公园';
+          const color = PARK_COLORS[parkType] || '#1565C0';
+          const accuracy = props.accuracy || 'unknown';
+
+          if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
+            // 有边界的公园 — 用多边形
+            const coords = geom.type === 'MultiPolygon'
+              ? geom.coordinates
+              : [geom.coordinates];
+
+            coords.forEach((polygonCoords: number[][][]) => {
+              const path = polygonCoords.map((ring: number[][]) =>
+                ring.map((coord: number[]) => new AMap.LngLat(coord[0], coord[1]))
+              );
+              const polygon = new AMap.Polygon({
+                path,
+                fillColor: color,
+                fillOpacity: 0.25,
+                strokeColor: color,
+                strokeWeight: 1.5,
+                strokeOpacity: 0.7,
+                zIndex: 10,
+                cursor: 'pointer',
+              });
+              polygon.on('click', () => {
+                const center = polygon.getBounds().getCenter();
+                showInfoWindow(AMap, center, props.name, `
+                  <div style="font-size:12px;color:#666">
+                    ${parkType} · ${props.district || ''}
+                    ${props.area ? `<br>面积: ${props.area}公顷` : ''}
+                    ${props.address ? `<br>${props.address}` : ''}
+                  </div>
+                `);
+              });
+              map.add(polygon);
+              parkLayerRef.current.push(polygon);
+            });
+          } else if (geom.type === 'Point') {
+            // 只有点坐标的公园 — 用圆点
+            const [lon, lat] = geom.coordinates;
+            const opacity = accuracy === 'high' || accuracy === 'medium' ? 0.8 : 0.5;
+            const radius = parkType === '自然公园' ? 6 : parkType === '城市公园' ? 5 : 3;
+
+            const circle = new AMap.CircleMarker({
+              center: new AMap.LngLat(lon, lat),
+              radius,
+              fillColor: color,
+              fillOpacity: opacity,
+              strokeColor: '#fff',
+              strokeWeight: 1,
+              strokeOpacity: 0.8,
+              zIndex: 10,
+              cursor: 'pointer',
+            });
+            circle.on('click', () => {
+              showInfoWindow(AMap, new AMap.LngLat(lon, lat), props.name, `
+                <div style="font-size:12px;color:#666">
+                  ${parkType} · ${props.district || ''}
+                  ${props.area ? `<br>面积: ${props.area}公顷` : ''}
+                  ${props.address ? `<br>${props.address}` : ''}
+                </div>
+              `);
+            });
+            map.add(circle);
+            parkLayerRef.current.push(circle);
+          }
+        });
+      })
+      .catch((err) => console.error('加载公园数据失败:', err));
+
+    return () => {
+      cancelled = true;
+      parkLayerRef.current.forEach((o) => map.remove(o));
+      parkLayerRef.current = [];
+    };
+  }, [map, loaded, activeCategories]);
+
+  // ======= 山峰图层 =======
+  useEffect(() => {
+    if (!map || !loaded) return;
+
+    // 清除旧图层
+    peakLayerRef.current.forEach((o) => map.remove(o));
+    peakLayerRef.current = [];
+
+    if (!activeCategories.has('peak')) return;
+
+    const AMap = (window as any).AMap;
+    let cancelled = false;
+
+    fetch('/shenzhen-peaks.geojson')
+      .then((res) => res.json())
+      .then((geojson: any) => {
+        if (cancelled) return;
+
+        const features = geojson.features || [];
+        features.forEach((feature: any) => {
+          const props = feature.properties;
+          const [lon, lat] = feature.geometry.coordinates;
+          const ele = props.elevation;
+          const color = getPeakColor(ele);
+          const radius = ele >= 800 ? 8 : ele >= 600 ? 6 : ele >= 400 ? 5 : 4;
+
+          // 山峰圆点
+          const circle = new AMap.CircleMarker({
+            center: new AMap.LngLat(lon, lat),
+            radius,
+            fillColor: color,
+            fillOpacity: 0.9,
+            strokeColor: '#fff',
+            strokeWeight: 2,
+            strokeOpacity: 1,
+            zIndex: 20,
+            cursor: 'pointer',
+          });
+          circle.on('click', () => {
+            showInfoWindow(AMap, new AMap.LngLat(lon, lat), props.name, `
+              <div style="font-size:14px;color:${color};font-weight:700">${ele}m</div>
+              <div style="font-size:12px;color:#666">
+                排名: #${props.rank}
+                ${props.name_en ? `<br>${props.name_en}` : ''}
+              </div>
+            `);
+          });
+          map.add(circle);
+          peakLayerRef.current.push(circle);
+
+          // 前10名显示名字标注
+          if (props.rank <= 10) {
+            const label = new AMap.Text({
+              text: `${props.name} ${ele}m`,
+              position: new AMap.LngLat(lon, lat),
+              offset: new AMap.Pixel(10, -8),
+              style: {
+                'font-size': '11px',
+                'font-weight': '700',
+                'color': color,
+                'background': 'rgba(255,255,255,0.9)',
+                'border': `1px solid ${color}`,
+                'border-radius': '3px',
+                'padding': '1px 5px',
+              },
+              zIndex: 21,
+            });
+            map.add(label);
+            peakLayerRef.current.push(label);
+          }
+        });
+      })
+      .catch((err) => console.error('加载山峰数据失败:', err));
+
+    return () => {
+      cancelled = true;
+      peakLayerRef.current.forEach((o) => map.remove(o));
+      peakLayerRef.current = [];
+    };
+  }, [map, loaded, activeCategories]);
+
+  // 信息窗口辅助函数
+  const showInfoWindow = useCallback((AMap: any, position: any, title: string, content: string) => {
+    if (infoWindowRef.current) {
+      infoWindowRef.current.close();
+    }
+    const iw = new AMap.InfoWindow({
+      content: `
+        <div style="padding:6px 2px;min-width:140px">
+          <div style="font-size:14px;font-weight:700;margin-bottom:4px">${title}</div>
+          ${content}
+        </div>
+      `,
+      offset: new AMap.Pixel(0, -10),
+    });
+    iw.open(map, position);
+    infoWindowRef.current = iw;
+  }, [map]);
+
   // 加载足迹数据
   const loadFootprints = useCallback(async () => {
     try {
       const params: Record<string, string> = {};
-      if (filter.category) params.category = filter.category;
-      if (filter.status) params.status = filter.status;
+      // 如果有选中的分类，传给后端过滤（暂时先加载全部，前端根据 activeCategories 过滤显示）
       const res = await api.getFootprints(params);
       setFootprints(res.data);
     } catch (e) {
       console.error('加载足迹失败:', e);
     }
-  }, [filter]);
+  }, []);
 
   useEffect(() => {
     loadFootprints();
@@ -288,27 +510,27 @@ export function MapView() {
   }, [loadFootprints]);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
-      <Sidebar
-        filter={filter}
-        onFilterChange={setFilter}
-        footprintCount={footprints.length}
+    <div style={{ position: 'relative', height: '100vh', width: '100vw' }}>
+      <div id="map-container" style={{ width: '100%', height: '100%' }} />
+
+      <TopBar
+        activeCategories={activeCategories}
+        onToggleCategory={handleToggleCategory}
+      />
+
+      <DistrictControl
         districtLevel={districtLevel}
         onDistrictLevelChange={setDistrictLevel}
       />
 
-      <div style={{ flex: 1, position: 'relative' }}>
-        <div id="map-container" style={{ width: '100%', height: '100%' }} />
-
-        {selectedFootprint && (
-          <DetailPanel
-            footprint={selectedFootprint}
-            onClose={() => setSelectedFootprint(null)}
-            onDelete={handleDelete}
-            onUpdate={loadFootprints}
-          />
-        )}
-      </div>
+      {selectedFootprint && (
+        <DetailPanel
+          footprint={selectedFootprint}
+          onClose={() => setSelectedFootprint(null)}
+          onDelete={handleDelete}
+          onUpdate={loadFootprints}
+        />
+      )}
     </div>
   );
 }
