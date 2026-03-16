@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../utils/api';
 import type { Category } from '../types';
 
-export type DistrictLevel = 'off' | 'district' | 'street' | 'community';
+export type DistrictLevel = 'off' | 'district' | 'street';
 
 interface SidebarProps {
   filter: { category?: string; status?: string };
@@ -23,7 +23,6 @@ const DISTRICT_LEVELS: { value: DistrictLevel; label: string }[] = [
   { value: 'off', label: '关' },
   { value: 'district', label: '区级' },
   { value: 'street', label: '街道' },
-  { value: 'community', label: '社区' },
 ];
 
 export function Sidebar({ filter, onFilterChange, footprintCount, districtLevel, onDistrictLevelChange }: SidebarProps) {

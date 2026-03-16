@@ -31,7 +31,15 @@ export function MapView() {
     '大鹏新区': '#00695C', // 墨绿
   };
 
-  // 加载行政区划边界（区级 / 街道级 / 社区级 / 关闭）
+  // 颜色工具：将 hex 转为 rgba
+  const hexToRgba = (hex: string, alpha: number) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  };
+
+  // 加载行政区划边界（区级 / 街道级 / 关闭）
   useEffect(() => {
     if (!map || !loaded) return;
 
@@ -44,11 +52,10 @@ export function MapView() {
     const AMap = (window as any).AMap;
     let cancelled = false;
 
-    const addPolygon = (feature: any, colorKey: string, opts: {
+    const addPolygon = (feature: any, color: string, opts: {
       fillOpacity: number; strokeWeight: number; strokeOpacity: number;
-      strokeStyle: string; zIndex: number;
+      strokeStyle: string; strokeColor?: string; zIndex: number;
     }) => {
-      const color = districtColors[colorKey] || '#999';
       const geometry = feature.geometry;
       if (!geometry) return;
 
@@ -65,7 +72,7 @@ export function MapView() {
           path,
           fillColor: color,
           fillOpacity: opts.fillOpacity,
-          strokeColor: color,
+          strokeColor: opts.strokeColor || color,
           strokeWeight: opts.strokeWeight,
           strokeOpacity: opts.strokeOpacity,
           strokeStyle: opts.strokeStyle,
@@ -97,7 +104,7 @@ export function MapView() {
             const name = feature.properties?.name;
             const color = districtColors[name] || '#999';
 
-            addPolygon(feature, name, {
+            addPolygon(feature, color, {
               fillOpacity: isBackground ? 0.04 : 0.15,
               strokeWeight: isBackground ? 1.5 : 2.5,
               strokeOpacity: isBackground ? 0.4 : 0.85,
@@ -122,72 +129,49 @@ export function MapView() {
         });
     };
 
-    const loadStreets = (isBackground: boolean) => {
+    const loadStreets = () => {
       return fetch('/shenzhen-streets.geojson')
         .then((res) => res.json())
         .then((geojson: any) => {
           if (cancelled) return;
           const features = geojson.features || [];
+
+          // 按区分组，给同区内的街道交替深浅填充
+          const districtStreetIndex: Record<string, number> = {};
+
           features.forEach((feature: any) => {
             const name = feature.properties?.name;
             const district = feature.properties?.district;
+            const color = districtColors[district] || '#999';
 
-            addPolygon(feature, district, {
-              fillOpacity: isBackground ? 0.04 : 0.08,
-              strokeWeight: isBackground ? 1 : 1.5,
-              strokeOpacity: isBackground ? 0.3 : 0.6,
+            // 同区内街道交替编号
+            if (!(district in districtStreetIndex)) {
+              districtStreetIndex[district] = 0;
+            }
+            const idx = districtStreetIndex[district]++;
+            const isEven = idx % 2 === 0;
+
+            // 交替深浅：偶数街道填充深一些，奇数浅一些
+            addPolygon(feature, color, {
+              fillOpacity: isEven ? 0.18 : 0.08,
+              strokeWeight: 2,
+              strokeOpacity: 0.8,
+              strokeColor: '#444',
               strokeStyle: 'solid',
               zIndex: 2,
             });
 
-            if (!isBackground) {
-              const labelPos = feature.properties?.centroid || feature.properties?.center;
-              if (labelPos) {
-                const shortName = name.replace('街道', '');
-                addLabel(shortName, labelPos, {
-                  'font-size': '11px',
-                  'color': '#555',
-                  'background': 'rgba(255,255,255,0.8)',
-                  'border': '1px solid #ccc',
-                  'border-radius': '3px',
-                  'padding': '1px 5px',
-                  'text-align': 'center',
-                }, 3);
-              }
-            }
-          });
-        });
-    };
-
-    const loadCommunities = () => {
-      return fetch('/shenzhen-communities.geojson')
-        .then((res) => res.json())
-        .then((geojson: any) => {
-          if (cancelled) return;
-          const features = geojson.features || [];
-          features.forEach((feature: any) => {
-            const name = feature.properties?.name;
-            const district = feature.properties?.district;
-
-            addPolygon(feature, district, {
-              fillOpacity: 0.06,
-              strokeWeight: 1,
-              strokeOpacity: 0.5,
-              strokeStyle: 'solid',
-              zIndex: 3,
-            });
-
-            // 社区名标注
             const labelPos = feature.properties?.centroid || feature.properties?.center;
             if (labelPos) {
-              const shortName = name.replace('社区', '');
+              const shortName = name.replace('街道', '');
               addLabel(shortName, labelPos, {
-                'font-size': '10px',
-                'color': '#777',
-                'background': 'rgba(255,255,255,0.75)',
-                'border': '1px solid #ddd',
-                'border-radius': '2px',
-                'padding': '0px 3px',
+                'font-size': '11px',
+                'font-weight': '600',
+                'color': color,
+                'background': 'rgba(255,255,255,0.9)',
+                'border': `1.5px solid ${color}`,
+                'border-radius': '3px',
+                'padding': '1px 6px',
                 'text-align': 'center',
               }, 3);
             }
@@ -198,10 +182,7 @@ export function MapView() {
     if (districtLevel === 'district') {
       loadDistricts(false).catch((err) => console.error('加载区级数据失败:', err));
     } else if (districtLevel === 'street') {
-      Promise.all([loadDistricts(true), loadStreets(false)])
-        .catch((err) => console.error('加载行政区划数据失败:', err));
-    } else if (districtLevel === 'community') {
-      Promise.all([loadDistricts(true), loadStreets(true), loadCommunities()])
+      Promise.all([loadDistricts(true), loadStreets()])
         .catch((err) => console.error('加载行政区划数据失败:', err));
     }
 
