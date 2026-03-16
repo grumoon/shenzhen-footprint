@@ -16,6 +16,89 @@ export function MapView() {
   const markersRef = useRef<any[]>([]);
   const polylinesRef = useRef<any[]>([]);
   const polygonsRef = useRef<any[]>([]);
+  const districtPolygonsRef = useRef<any[]>([]);
+
+  // 深圳各区配色
+  const districtColors: Record<string, string> = {
+    '福田区': '#FF6B6B',
+    '罗湖区': '#4ECDC4',
+    '南山区': '#45B7D1',
+    '盐田区': '#96CEB4',
+    '宝安区': '#FFEAA7',
+    '龙岗区': '#DDA0DD',
+    '龙华区': '#98D8C8',
+    '坪山区': '#F7DC6F',
+    '光明区': '#82E0AA',
+    '大鹏新区': '#85C1E9',
+  };
+
+  // 加载深圳各区行政区划边界
+  useEffect(() => {
+    if (!map || !loaded) return;
+
+    const AMap = (window as any).AMap;
+    const districtSearch = new AMap.DistrictSearch({
+      level: 'district',
+      extensions: 'all', // 返回行政区边界坐标
+      subdistrict: 1,    // 返回下一级
+    });
+
+    // 搜索深圳市，获取各区边界
+    districtSearch.search('深圳市', (status: string, result: any) => {
+      if (status !== 'complete') return;
+
+      const districts = result.districtList?.[0]?.districtList || [];
+
+      districts.forEach((district: any) => {
+        const name = district.name;
+        const color = districtColors[name] || '#999';
+        const boundaries = district.boundaries || [];
+
+        boundaries.forEach((boundary: any) => {
+          const polygon = new AMap.Polygon({
+            path: boundary,
+            fillColor: color,
+            fillOpacity: 0.08,
+            strokeColor: color,
+            strokeWeight: 2,
+            strokeOpacity: 0.6,
+            strokeStyle: 'dashed',
+            zIndex: 1,
+          });
+          map.add(polygon);
+          districtPolygonsRef.current.push(polygon);
+
+          // 区名标注 — 在区域中心显示
+          const bounds = polygon.getBounds();
+          if (bounds) {
+            const center = bounds.getCenter();
+            const text = new AMap.Text({
+              text: name,
+              position: [center.getLng(), center.getLat()],
+              style: {
+                'font-size': '13px',
+                'font-weight': 'bold',
+                'color': color,
+                'background': 'rgba(255,255,255,0.85)',
+                'border': `1px solid ${color}`,
+                'border-radius': '4px',
+                'padding': '2px 8px',
+                'text-align': 'center',
+              },
+              zIndex: 2,
+            });
+            map.add(text);
+            districtPolygonsRef.current.push(text);
+          }
+        });
+      });
+    });
+
+    return () => {
+      districtPolygonsRef.current.forEach((p) => map.remove(p));
+      districtPolygonsRef.current = [];
+    };
+  }, [map, loaded]);
 
   // 加载足迹数据
   const loadFootprints = useCallback(async () => {
