@@ -5,9 +5,9 @@ import type { Category } from '../types';
 interface SidebarProps {
   filter: { category?: string; status?: string };
   onFilterChange: (f: { category?: string; status?: string }) => void;
-  isAdding: boolean;
-  onToggleAdd: () => void;
   footprintCount: number;
+  showDistricts: boolean;
+  onToggleDistricts: () => void;
 }
 
 const STATUS_OPTIONS = [
@@ -17,7 +17,7 @@ const STATUS_OPTIONS = [
   { value: 'collected', label: '收藏' },
 ];
 
-export function Sidebar({ filter, onFilterChange, isAdding, onToggleAdd, footprintCount }: SidebarProps) {
+export function Sidebar({ filter, onFilterChange, footprintCount, showDistricts, onToggleDistricts }: SidebarProps) {
   const [categories, setCategories] = useState<Category[]>([]);
 
   useEffect(() => {
@@ -43,23 +43,6 @@ export function Sidebar({ filter, onFilterChange, isAdding, onToggleAdd, footpri
           共 {footprintCount} 个标注
         </p>
       </div>
-
-      <button
-        onClick={onToggleAdd}
-        style={{
-          padding: '10px 0',
-          background: isAdding ? '#ff4d4f' : '#1677ff',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 8,
-          fontSize: 15,
-          fontWeight: 600,
-          cursor: 'pointer',
-          transition: 'background 0.2s',
-        }}
-      >
-        {isAdding ? '✕ 取消添加' : '＋ 添加标注'}
-      </button>
 
       <div>
         <div style={{ fontSize: 13, color: '#666', marginBottom: 6, fontWeight: 600 }}>分类筛选</div>
@@ -102,6 +85,44 @@ export function Sidebar({ filter, onFilterChange, isAdding, onToggleAdd, footpri
             />
           ))}
         </div>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <span style={{ fontSize: 13, color: '#666', fontWeight: 600 }}>行政区划</span>
+        <button
+          onClick={onToggleDistricts}
+          style={{
+            position: 'relative',
+            width: 44,
+            height: 24,
+            borderRadius: 12,
+            border: 'none',
+            background: showDistricts ? '#1677ff' : '#ddd',
+            cursor: 'pointer',
+            transition: 'background 0.2s',
+            padding: 0,
+          }}
+        >
+          <span
+            style={{
+              position: 'absolute',
+              top: 2,
+              left: showDistricts ? 22 : 2,
+              width: 20,
+              height: 20,
+              borderRadius: '50%',
+              background: '#fff',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+              transition: 'left 0.2s',
+            }}
+          />
+        </button>
       </div>
     </div>
   );

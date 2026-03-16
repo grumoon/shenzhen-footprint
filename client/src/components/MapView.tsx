@@ -4,37 +4,41 @@ import { api } from '../utils/api';
 import type { Footprint } from '../types';
 import { Sidebar } from './Sidebar';
 import { DetailPanel } from './DetailPanel';
-import { AddPanel } from './AddPanel';
 
 export function MapView() {
   const { map, loaded } = useAMap('map-container');
   const [footprints, setFootprints] = useState<Footprint[]>([]);
   const [selectedFootprint, setSelectedFootprint] = useState<Footprint | null>(null);
-  const [isAdding, setIsAdding] = useState(false);
-  const [addingLngLat, setAddingLngLat] = useState<[number, number] | null>(null);
   const [filter, setFilter] = useState<{ category?: string; status?: string }>({});
+  const [showDistricts, setShowDistricts] = useState(true);
   const markersRef = useRef<any[]>([]);
   const polylinesRef = useRef<any[]>([]);
   const polygonsRef = useRef<any[]>([]);
   const districtPolygonsRef = useRef<any[]>([]);
 
-  // 深圳各区配色
+  // 深圳各区配色（加深版）
   const districtColors: Record<string, string> = {
-    '福田区': '#FF6B6B',
-    '罗湖区': '#4ECDC4',
-    '南山区': '#45B7D1',
-    '盐田区': '#96CEB4',
-    '宝安区': '#FFEAA7',
-    '龙岗区': '#DDA0DD',
-    '龙华区': '#98D8C8',
-    '坪山区': '#F7DC6F',
-    '光明区': '#82E0AA',
-    '大鹏新区': '#85C1E9',
+    '福田区': '#D32F2F',
+    '罗湖区': '#00897B',
+    '南山区': '#1976D2',
+    '盐田区': '#2E7D32',
+    '宝安区': '#F9A825',
+    '龙岗区': '#8E24AA',
+    '龙华区': '#00796B',
+    '坪山区': '#E65100',
+    '光明区': '#388E3C',
+    '大鹏新区': '#1565C0',
   };
 
   // 加载深圳各区行政区划边界（本地 GeoJSON 数据）
   useEffect(() => {
     if (!map || !loaded) return;
+
+    // 先清除旧的
+    districtPolygonsRef.current.forEach((p) => map.remove(p));
+    districtPolygonsRef.current = [];
+
+    if (!showDistricts) return;
 
     const AMap = (window as any).AMap;
     let cancelled = false;
@@ -65,10 +69,10 @@ export function MapView() {
             const polygon = new AMap.Polygon({
               path,
               fillColor: color,
-              fillOpacity: 0.08,
+              fillOpacity: 0.15,
               strokeColor: color,
-              strokeWeight: 2,
-              strokeOpacity: 0.6,
+              strokeWeight: 2.5,
+              strokeOpacity: 0.85,
               strokeStyle: 'dashed',
               zIndex: 1,
             });
@@ -86,8 +90,8 @@ export function MapView() {
                 'font-size': '13px',
                 'font-weight': 'bold',
                 'color': color,
-                'background': 'rgba(255,255,255,0.85)',
-                'border': `1px solid ${color}`,
+                'background': 'rgba(255,255,255,0.9)',
+                'border': `1.5px solid ${color}`,
                 'border-radius': '4px',
                 'padding': '2px 8px',
                 'text-align': 'center',
@@ -108,7 +112,7 @@ export function MapView() {
       districtPolygonsRef.current.forEach((p) => map.remove(p));
       districtPolygonsRef.current = [];
     };
-  }, [map, loaded]);
+  }, [map, loaded, showDistricts]);
 
   // 加载足迹数据
   const loadFootprints = useCallback(async () => {
@@ -185,25 +189,17 @@ export function MapView() {
     });
   }, [map, loaded, footprints]);
 
-  // 地图点击事件 — 添加模式
+  // 地图点击事件
   useEffect(() => {
     if (!map || !loaded) return;
 
-    const handleClick = (e: any) => {
-      if (isAdding) {
-        setAddingLngLat([e.lnglat.getLng(), e.lnglat.getLat()]);
-      }
+    const handleClick = () => {
+      // 预留：后续可加交互
     };
 
     map.on('click', handleClick);
     return () => map.off('click', handleClick);
-  }, [map, loaded, isAdding]);
-
-  const handleAddComplete = useCallback(() => {
-    setIsAdding(false);
-    setAddingLngLat(null);
-    loadFootprints();
-  }, [loadFootprints]);
+  }, [map, loaded]);
 
   const handleDelete = useCallback(async (id: number) => {
     if (!confirm('确定删除？')) return;
@@ -217,55 +213,20 @@ export function MapView() {
       <Sidebar
         filter={filter}
         onFilterChange={setFilter}
-        isAdding={isAdding}
-        onToggleAdd={() => {
-          setIsAdding(!isAdding);
-          setAddingLngLat(null);
-          setSelectedFootprint(null);
-        }}
         footprintCount={footprints.length}
+        showDistricts={showDistricts}
+        onToggleDistricts={() => setShowDistricts(!showDistricts)}
       />
 
       <div style={{ flex: 1, position: 'relative' }}>
         <div id="map-container" style={{ width: '100%', height: '100%' }} />
 
-        {isAdding && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 16,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              background: '#1677ff',
-              color: '#fff',
-              padding: '8px 20px',
-              borderRadius: 20,
-              fontSize: 14,
-              zIndex: 1000,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            }}
-          >
-            点击地图选择位置
-          </div>
-        )}
-
-        {selectedFootprint && !isAdding && (
+        {selectedFootprint && (
           <DetailPanel
             footprint={selectedFootprint}
             onClose={() => setSelectedFootprint(null)}
             onDelete={handleDelete}
             onUpdate={loadFootprints}
-          />
-        )}
-
-        {addingLngLat && isAdding && (
-          <AddPanel
-            lngLat={addingLngLat}
-            onComplete={handleAddComplete}
-            onCancel={() => {
-              setAddingLngLat(null);
-              setIsAdding(false);
-            }}
           />
         )}
       </div>
