@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>深圳街道边界数据获取工具</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
+        #log { white-space: pre-wrap; font-size: 13px; max-height: 500px; overflow-y: auto; background: #16213e; padding: 15px; border-radius: 8px; margin: 10px 0; }
+        .success { color: #4ade80; }
+        .error { color: #f87171; }
+        .info { color: #60a5fa; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #3b82f6; color: white; border: none; border-radius: 6px; margin: 5px; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #progress { font-size: 18px; margin: 10px 0; }
+        textarea { width: 100%; height: 200px; font-size: 12px; background: #0f3460; color: #e0e0e0; border: 1px solid #333; border-radius: 8px; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>🗺️ 深圳街道边界数据获取工具</h1>
+    <p>使用高德地图 DistrictSearch API 获取深圳市74个街道的边界数据</p>
+    <div>
+        <button id="startBtn" onclick="startFetch()">开始获取</button>
+        <button id="exportBtn" onclick="exportGeoJSON()" disabled>导出 GeoJSON</button>
+        <button id="copyBtn" onclick="copyGeoJSON()" disabled>复制到剪贴板</button>
+    </div>
+    <div id="progress"></div>
+    <div id="log"></div>
+    <textarea id="output" placeholder="GeoJSON数据将显示在这里..."></textarea>
+
+    <script>
+        // 深圳10区及其街道
+        const DISTRICTS = {
+            "福田区": {adcode:"440304", streets:["南园街道","园岭街道","福田街道","沙头街道","香蜜湖街道","梅林街道","莲花街道","华富街道","福保街道","华强北街道"]},
+            "罗湖区": {adcode:"440303", streets:["桂园街道","黄贝街道","东门街道","翠竹街道","南湖街道","笋岗街道","东湖街道","莲塘街道","东晓街道","清水河街道"]},
+            "南山区": {adcode:"440305", streets:["南头街道","南山街道","沙河街道","蛇口街道","招商街道","粤海街道","桃源街道","西丽街道"]},
+            "盐田区": {adcode:"440308", streets:["沙头角街道","海山街道","盐田街道","梅沙街道"]},
+            "宝安区": {adcode:"440306", streets:["新安街道","西乡街道","福海街道","沙井街道","松岗街道","燕罗街道","石岩街道","航城街道","福永街道","新桥街道"]},
+            "龙岗区": {adcode:"440307", streets:["坂田街道","南湾街道","横岗街道","龙岗街道","龙城街道","布吉街道","吉华街道","园山街道","平湖街道","宝龙街道","坪地街道"]},
+            "龙华区": {adcode:"440309", streets:["观湖街道","民治街道","龙华街道","大浪街道","福城街道","观澜街道"]},
+            "坪山区": {adcode:"440310", streets:["坪山街道","坑梓街道","碧岭街道","石井街道","马峦街道","龙田街道"]},
+            "光明区": {adcode:"440311", streets:["光明街道","公明街道","新湖街道","凤凰街道","玉塘街道","马田街道"]},
+            "大鹏新区": {adcode:"440312", streets:["葵涌街道","大鹏街道","南澳街道"]}
+        };
+
+        let allFeatures = [];
+        let logEl, progressEl;
+
+        function log(msg, cls='') {
+            logEl = logEl || document.getElementById('log');
+            const span = document.createElement('span');
+            span.className = cls;
+            span.textContent = msg + '\n';
+            logEl.appendChild(span);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function updateProgress(done, total) {
+            progressEl = progressEl || document.getElementById('progress');
+            progressEl.textContent = `进度: ${done}/${total} (${(done/total*100).toFixed(1)}%)`;
+        }
+
+        function sleep(ms) {
+            return new Promise(r => setTimeout(r, ms));
+        }
+
+        // 搜索单个街道的边界
+        function searchStreet(districtSearch, streetName, districtName) {
+            return new Promise((resolve) => {
+                districtSearch.search(streetName, (status, result) => {
+                    if (status === 'complete' && result.districtList && result.districtList.length > 0) {
+                        // 可能返回多个结果，找属于当前区的
+                        let target = result.districtList[0];
+                        for (const d of result.districtList) {
+                            // 检查是否属于深圳
+                            if (d.citycode === '0755') {
+                                target = d;
+                                break;
+                            }
+                        }
+                        resolve({ status: 'ok', data: target });
+                    } else {
+                        resolve({ status: 'error', error: status });
+                    }
+                });
+            });
+        }
+
+        // 将高德boundaries转为GeoJSON geometry
+        function boundariesToGeoJSON(boundaries) {
+            if (!boundaries || boundaries.length === 0) return null;
+            
+            const polygons = [];
+            for (const boundary of boundaries) {
+                const path = boundary.map(lnglat => {
+                    if (typeof lnglat === 'string') {
+                        const parts = lnglat.split(',');
+                        return [parseFloat(parts[0]), parseFloat(parts[1])];
+                    }
+                    return [lnglat.lng || lnglat.getLng(), lnglat.lat || lnglat.getLat()];
+                });
+                // 闭合多边形
+                if (path.length > 0) {
+                    const first = path[0];
+                    const last = path[path.length - 1];
+                    if (first[0] !== last[0] || first[1] !== last[1]) {
+                        path.push([first[0], first[1]]);
+                    }
+                }
+                polygons.push([path]);
+            }
+
+            if (polygons.length === 1) {
+                return { type: 'Polygon', coordinates: polygons[0] };
+            }
+            return { type: 'MultiPolygon', coordinates: polygons };
+        }
+
+        async function startFetch() {
+            document.getElementById('startBtn').disabled = true;
+            allFeatures = [];
+            
+            const totalStreets = Object.values(DISTRICTS).reduce((sum, d) => sum + d.streets.length, 0);
+            let done = 0;
+            
+            log('初始化高德地图 DistrictSearch...', 'info');
+            
+            // 等待AMap加载
+            if (!window.AMap) {
+                log('等待高德地图API加载...', 'info');
+                await new Promise(r => setTimeout(r, 2000));
+            }
+
+            const districtSearch = new AMap.DistrictSearch({
+                subdistrict: 0,
+                extensions: 'all',
+                level: 'street'  // 尝试 street 级别
+            });
+
+            log(`开始获取 ${totalStreets} 个街道的边界数据...\n`, 'info');
+
+            for (const [districtName, districtInfo] of Object.entries(DISTRICTS)) {
+                log(`\n📍 ${districtName} (${districtInfo.streets.length}个街道)`, 'info');
+
+                for (const streetName of districtInfo.streets) {
+                    try {
+                        const result = await searchStreet(districtSearch, streetName, districtName);
+                        
+                        if (result.status === 'ok') {
+                            const d = result.data;
+                            const boundaries = d.boundaries;
+                            
+                            if (boundaries && boundaries.length > 0) {
+                                const geometry = boundariesToGeoJSON(boundaries);
+                                if (geometry) {
+                                    const feature = {
+                                        type: 'Feature',
+                                        properties: {
+                                            name: streetName,
+                                            district: districtName,
+                                            adcode: d.adcode || '',
+                                            center: d.center ? [d.center.lng || d.center.getLng(), d.center.lat || d.center.getLat()] : null,
+                                            level: d.level || 'street'
+                                        },
+                                        geometry: geometry
+                                    };
+                                    allFeatures.push(feature);
+                                    log(`  ✅ ${streetName}: ${boundaries.length}个多边形, adcode=${d.adcode}`, 'success');
+                                } else {
+                                    log(`  ⚠️ ${streetName}: boundaries解析失败`, 'error');
+                                }
+                            } else {
+                                log(`  ❌ ${streetName}: 无边界数据 (level=${d.level})`, 'error');
+                            }
+                        } else {
+                            log(`  ❌ ${streetName}: 查询失败 (${result.error})`, 'error');
+                        }
+                    } catch (e) {
+                        log(`  ❌ ${streetName}: 异常 ${e.message}`, 'error');
+                    }
+
+                    done++;
+                    updateProgress(done, totalStreets);
+                    
+                    // 控制请求频率，避免被限流
+                    await sleep(300);
+                }
+            }
+
+            log(`\n========================================`, 'info');
+            log(`获取完成！成功: ${allFeatures.length}/${totalStreets}`, allFeatures.length === totalStreets ? 'success' : 'error');
+            
+            if (allFeatures.length > 0) {
+                document.getElementById('exportBtn').disabled = false;
+                document.getElementById('copyBtn').disabled = false;
+                
+                const geojson = {
+                    type: 'FeatureCollection',
+                    features: allFeatures
+                };
+                document.getElementById('output').value = JSON.stringify(geojson, null, 2).substring(0, 5000) + '\n... (truncated for display)';
+                log(`\nGeoJSON 已就绪，共 ${allFeatures.length} 个街道边界。点击"导出"或"复制"获取完整数据。`, 'success');
+            }
+            
+            document.getElementById('startBtn').disabled = false;
+        }
+
+        function getFullGeoJSON() {
+            return JSON.stringify({
+                type: 'FeatureCollection',
+                features: allFeatures
+            });
+        }
+
+        function exportGeoJSON() {
+            const data = getFullGeoJSON();
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'shenzhen-streets.geojson';
+            a.click();
+            URL.revokeObjectURL(url);
+            log('已导出 shenzhen-streets.geojson', 'success');
+        }
+
+        function copyGeoJSON() {
+            const data = getFullGeoJSON();
+            navigator.clipboard.writeText(data).then(() => {
+                log(`已复制到剪贴板 (${(data.length/1024).toFixed(1)} KB)`, 'success');
+            });
+        }
+    </script>
+    <script src="https://webapi.amap.com/maps?v=2.0&key=e565943cb0fc8136a0971093ef819748&plugin=AMap.DistrictSearch"></script>
+</body>
+</html>

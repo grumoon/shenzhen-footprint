@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { api } from '../utils/api';
 import type { Category } from '../types';
 
+export type DistrictLevel = 'off' | 'district' | 'street';
+
 interface SidebarProps {
   filter: { category?: string; status?: string };
   onFilterChange: (f: { category?: string; status?: string }) => void;
   footprintCount: number;
-  showDistricts: boolean;
-  onToggleDistricts: () => void;
+  districtLevel: DistrictLevel;
+  onDistrictLevelChange: (level: DistrictLevel) => void;
 }
 
 const STATUS_OPTIONS = [
@@ -17,7 +19,13 @@ const STATUS_OPTIONS = [
   { value: 'collected', label: '收藏' },
 ];
 
-export function Sidebar({ filter, onFilterChange, footprintCount, showDistricts, onToggleDistricts }: SidebarProps) {
+const DISTRICT_LEVELS: { value: DistrictLevel; label: string }[] = [
+  { value: 'off', label: '关' },
+  { value: 'district', label: '区级' },
+  { value: 'street', label: '街道' },
+];
+
+export function Sidebar({ filter, onFilterChange, footprintCount, districtLevel, onDistrictLevelChange }: SidebarProps) {
   const [categories, setCategories] = useState<Category[]>([]);
 
   useEffect(() => {
@@ -87,42 +95,30 @@ export function Sidebar({ filter, onFilterChange, footprintCount, showDistricts,
         </div>
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <span style={{ fontSize: 13, color: '#666', fontWeight: 600 }}>行政区划</span>
-        <button
-          onClick={onToggleDistricts}
-          style={{
-            position: 'relative',
-            width: 44,
-            height: 24,
-            borderRadius: 12,
-            border: 'none',
-            background: showDistricts ? '#1677ff' : '#ddd',
-            cursor: 'pointer',
-            transition: 'background 0.2s',
-            padding: 0,
-          }}
-        >
-          <span
-            style={{
-              position: 'absolute',
-              top: 2,
-              left: showDistricts ? 22 : 2,
-              width: 20,
-              height: 20,
-              borderRadius: '50%',
-              background: '#fff',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-              transition: 'left 0.2s',
-            }}
-          />
-        </button>
+      <div>
+        <div style={{ fontSize: 13, color: '#666', marginBottom: 6, fontWeight: 600 }}>行政区划</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {DISTRICT_LEVELS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => onDistrictLevelChange(opt.value)}
+              style={{
+                flex: 1,
+                padding: '5px 0',
+                borderRadius: 6,
+                border: `1px solid ${districtLevel === opt.value ? '#1677ff' : '#ddd'}`,
+                background: districtLevel === opt.value ? '#1677ff' : '#fff',
+                color: districtLevel === opt.value ? '#fff' : '#333',
+                fontSize: 12,
+                fontWeight: districtLevel === opt.value ? 600 : 400,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

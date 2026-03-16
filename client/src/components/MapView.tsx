@@ -3,6 +3,7 @@ import { useAMap } from '../hooks/useAMap';
 import { api } from '../utils/api';
 import type { Footprint } from '../types';
 import { Sidebar } from './Sidebar';
+import type { DistrictLevel } from './Sidebar';
 import { DetailPanel } from './DetailPanel';
 
 export function MapView() {
@@ -10,7 +11,7 @@ export function MapView() {
   const [footprints, setFootprints] = useState<Footprint[]>([]);
   const [selectedFootprint, setSelectedFootprint] = useState<Footprint | null>(null);
   const [filter, setFilter] = useState<{ category?: string; status?: string }>({});
-  const [showDistricts, setShowDistricts] = useState(true);
+  const [districtLevel, setDistrictLevel] = useState<DistrictLevel>('district');
   const markersRef = useRef<any[]>([]);
   const polylinesRef = useRef<any[]>([]);
   const polygonsRef = useRef<any[]>([]);
@@ -30,7 +31,7 @@ export function MapView() {
     '大鹏新区': '#1565C0',
   };
 
-  // 加载深圳各区行政区划边界（本地 GeoJSON 数据）
+  // 加载行政区划边界（区级 / 街道级 / 关闭）
   useEffect(() => {
     if (!map || !loaded) return;
 
@@ -38,81 +39,148 @@ export function MapView() {
     districtPolygonsRef.current.forEach((p) => map.remove(p));
     districtPolygonsRef.current = [];
 
-    if (!showDistricts) return;
+    if (districtLevel === 'off') return;
 
     const AMap = (window as any).AMap;
     let cancelled = false;
 
-    fetch('/shenzhen-districts.geojson')
-      .then((res) => res.json())
-      .then((geojson: any) => {
-        if (cancelled) return;
+    const loadDistricts = () => {
+      return fetch('/shenzhen-districts.geojson')
+        .then((res) => res.json())
+        .then((geojson: any) => {
+          if (cancelled) return;
 
-        const features = geojson.features || [];
-        features.forEach((feature: any) => {
-          const name = feature.properties?.name;
-          const color = districtColors[name] || '#999';
-          const geometry = feature.geometry;
-          if (!geometry) return;
+          const features = geojson.features || [];
+          features.forEach((feature: any) => {
+            const name = feature.properties?.name;
+            const color = districtColors[name] || '#999';
+            const geometry = feature.geometry;
+            if (!geometry) return;
 
-          // GeoJSON MultiPolygon → 高德 Polygon
-          const coords = geometry.type === 'MultiPolygon'
-            ? geometry.coordinates
-            : [geometry.coordinates]; // Polygon → 包一层
+            const coords = geometry.type === 'MultiPolygon'
+              ? geometry.coordinates
+              : [geometry.coordinates];
 
-          coords.forEach((polygonCoords: number[][][]) => {
-            // polygonCoords[0] 是外环，后续是洞
-            const path = polygonCoords.map((ring: number[][]) =>
-              ring.map((coord: number[]) => new AMap.LngLat(coord[0], coord[1]))
-            );
+            coords.forEach((polygonCoords: number[][][]) => {
+              const path = polygonCoords.map((ring: number[][]) =>
+                ring.map((coord: number[]) => new AMap.LngLat(coord[0], coord[1]))
+              );
 
-            const polygon = new AMap.Polygon({
-              path,
-              fillColor: color,
-              fillOpacity: 0.15,
-              strokeColor: color,
-              strokeWeight: 2.5,
-              strokeOpacity: 0.85,
-              strokeStyle: 'dashed',
-              zIndex: 1,
+              const polygon = new AMap.Polygon({
+                path,
+                fillColor: color,
+                fillOpacity: districtLevel === 'street' ? 0.06 : 0.15,
+                strokeColor: color,
+                strokeWeight: districtLevel === 'street' ? 2 : 2.5,
+                strokeOpacity: districtLevel === 'street' ? 0.5 : 0.85,
+                strokeStyle: 'dashed',
+                zIndex: 1,
+              });
+              map.add(polygon);
+              districtPolygonsRef.current.push(polygon);
             });
-            map.add(polygon);
-            districtPolygonsRef.current.push(polygon);
+
+            // 区名标注
+            const labelPos = feature.properties?.centroid || feature.properties?.center;
+            if (labelPos) {
+              const text = new AMap.Text({
+                text: name,
+                position: new AMap.LngLat(labelPos[0], labelPos[1]),
+                style: {
+                  'font-size': '13px',
+                  'font-weight': 'bold',
+                  'color': color,
+                  'background': 'rgba(255,255,255,0.9)',
+                  'border': `1.5px solid ${color}`,
+                  'border-radius': '4px',
+                  'padding': '2px 8px',
+                  'text-align': 'center',
+                },
+                zIndex: districtLevel === 'street' ? 3 : 2,
+              });
+              map.add(text);
+              districtPolygonsRef.current.push(text);
+            }
           });
-
-          // 区名标注 — 用 centroid（质心）或 center
-          const labelPos = feature.properties?.centroid || feature.properties?.center;
-          if (labelPos) {
-            const text = new AMap.Text({
-              text: name,
-              position: new AMap.LngLat(labelPos[0], labelPos[1]),
-              style: {
-                'font-size': '13px',
-                'font-weight': 'bold',
-                'color': color,
-                'background': 'rgba(255,255,255,0.9)',
-                'border': `1.5px solid ${color}`,
-                'border-radius': '4px',
-                'padding': '2px 8px',
-                'text-align': 'center',
-              },
-              zIndex: 2,
-            });
-            map.add(text);
-            districtPolygonsRef.current.push(text);
-          }
         });
-      })
-      .catch((err) => {
-        console.error('加载行政区划数据失败:', err);
-      });
+    };
+
+    const loadStreets = () => {
+      return fetch('/shenzhen-streets.geojson')
+        .then((res) => res.json())
+        .then((geojson: any) => {
+          if (cancelled) return;
+
+          const features = geojson.features || [];
+          features.forEach((feature: any) => {
+            const name = feature.properties?.name;
+            const district = feature.properties?.district;
+            const color = districtColors[district] || '#999';
+            const geometry = feature.geometry;
+            if (!geometry) return;
+
+            const coords = geometry.type === 'MultiPolygon'
+              ? geometry.coordinates
+              : [geometry.coordinates];
+
+            coords.forEach((polygonCoords: number[][][]) => {
+              const path = polygonCoords.map((ring: number[][]) =>
+                ring.map((coord: number[]) => new AMap.LngLat(coord[0], coord[1]))
+              );
+
+              const polygon = new AMap.Polygon({
+                path,
+                fillColor: color,
+                fillOpacity: 0.08,
+                strokeColor: color,
+                strokeWeight: 1.5,
+                strokeOpacity: 0.6,
+                strokeStyle: 'solid',
+                zIndex: 2,
+              });
+              map.add(polygon);
+              districtPolygonsRef.current.push(polygon);
+            });
+
+            // 街道名标注
+            const labelPos = feature.properties?.centroid || feature.properties?.center;
+            if (labelPos) {
+              const shortName = name.replace('街道', '');
+              const text = new AMap.Text({
+                text: shortName,
+                position: new AMap.LngLat(labelPos[0], labelPos[1]),
+                style: {
+                  'font-size': '11px',
+                  'color': '#555',
+                  'background': 'rgba(255,255,255,0.8)',
+                  'border': '1px solid #ccc',
+                  'border-radius': '3px',
+                  'padding': '1px 5px',
+                  'text-align': 'center',
+                },
+                zIndex: 2,
+              });
+              map.add(text);
+              districtPolygonsRef.current.push(text);
+            }
+          });
+        });
+    };
+
+    if (districtLevel === 'district') {
+      loadDistricts().catch((err) => console.error('加载区级数据失败:', err));
+    } else if (districtLevel === 'street') {
+      // 街道模式：先加载区级边界（淡化），再叠加街道边界
+      Promise.all([loadDistricts(), loadStreets()])
+        .catch((err) => console.error('加载行政区划数据失败:', err));
+    }
 
     return () => {
       cancelled = true;
       districtPolygonsRef.current.forEach((p) => map.remove(p));
       districtPolygonsRef.current = [];
     };
-  }, [map, loaded, showDistricts]);
+  }, [map, loaded, districtLevel]);
 
   // 加载足迹数据
   const loadFootprints = useCallback(async () => {
@@ -214,8 +282,8 @@ export function MapView() {
         filter={filter}
         onFilterChange={setFilter}
         footprintCount={footprints.length}
-        showDistricts={showDistricts}
-        onToggleDistricts={() => setShowDistricts(!showDistricts)}
+        districtLevel={districtLevel}
+        onDistrictLevelChange={setDistrictLevel}
       />
 
       <div style={{ flex: 1, position: 'relative' }}>
