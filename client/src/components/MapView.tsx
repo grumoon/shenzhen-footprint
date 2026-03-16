@@ -32,80 +32,79 @@ export function MapView() {
     '大鹏新区': '#85C1E9',
   };
 
-  // 加载深圳各区行政区划边界
+  // 加载深圳各区行政区划边界（本地 GeoJSON 数据）
   useEffect(() => {
     if (!map || !loaded) return;
 
     const AMap = (window as any).AMap;
+    let cancelled = false;
 
-    // 深圳各区名称列表，逐个查询边界
-    const districtNames = Object.keys(districtColors);
+    fetch('/shenzhen-districts.geojson')
+      .then((res) => res.json())
+      .then((geojson: any) => {
+        if (cancelled) return;
 
-    districtNames.forEach((name) => {
-      const color = districtColors[name];
+        const features = geojson.features || [];
+        features.forEach((feature: any) => {
+          const name = feature.properties?.name;
+          const color = districtColors[name] || '#999';
+          const geometry = feature.geometry;
+          if (!geometry) return;
 
-      // 每个区单独查询，extensions: 'all' 才会返回 boundaries
-      const searcher = new AMap.DistrictSearch({
-        level: 'district',
-        extensions: 'all',
-        subdistrict: 0,
-      });
+          // GeoJSON MultiPolygon → 高德 Polygon
+          const coords = geometry.type === 'MultiPolygon'
+            ? geometry.coordinates
+            : [geometry.coordinates]; // Polygon → 包一层
 
-      searcher.search(name, (status: string, result: any) => {
-        if (status !== 'complete') {
-          console.warn(`行政区划查询失败: ${name}`, status, result);
-          return;
-        }
+          coords.forEach((polygonCoords: number[][][]) => {
+            // polygonCoords[0] 是外环，后续是洞
+            const path = polygonCoords.map((ring: number[][]) =>
+              ring.map((coord: number[]) => new AMap.LngLat(coord[0], coord[1]))
+            );
 
-        const districtData = result.districtList?.[0];
-        if (!districtData) return;
-
-        const boundaries = districtData.boundaries || [];
-        if (boundaries.length === 0) {
-          console.warn(`${name} 没有边界数据`);
-          return;
-        }
-
-        boundaries.forEach((boundary: any) => {
-          const polygon = new AMap.Polygon({
-            path: boundary,
-            fillColor: color,
-            fillOpacity: 0.08,
-            strokeColor: color,
-            strokeWeight: 2,
-            strokeOpacity: 0.6,
-            strokeStyle: 'dashed',
-            zIndex: 1,
+            const polygon = new AMap.Polygon({
+              path,
+              fillColor: color,
+              fillOpacity: 0.08,
+              strokeColor: color,
+              strokeWeight: 2,
+              strokeOpacity: 0.6,
+              strokeStyle: 'dashed',
+              zIndex: 1,
+            });
+            map.add(polygon);
+            districtPolygonsRef.current.push(polygon);
           });
-          map.add(polygon);
-          districtPolygonsRef.current.push(polygon);
+
+          // 区名标注 — 用 centroid（质心）或 center
+          const labelPos = feature.properties?.centroid || feature.properties?.center;
+          if (labelPos) {
+            const text = new AMap.Text({
+              text: name,
+              position: new AMap.LngLat(labelPos[0], labelPos[1]),
+              style: {
+                'font-size': '13px',
+                'font-weight': 'bold',
+                'color': color,
+                'background': 'rgba(255,255,255,0.85)',
+                'border': `1px solid ${color}`,
+                'border-radius': '4px',
+                'padding': '2px 8px',
+                'text-align': 'center',
+              },
+              zIndex: 2,
+            });
+            map.add(text);
+            districtPolygonsRef.current.push(text);
+          }
         });
-
-        // 区名标注 — 用区的 center 坐标
-        const center = districtData.center;
-        if (center) {
-          const text = new AMap.Text({
-            text: name,
-            position: [center.lng, center.lat],
-            style: {
-              'font-size': '13px',
-              'font-weight': 'bold',
-              'color': color,
-              'background': 'rgba(255,255,255,0.85)',
-              'border': `1px solid ${color}`,
-              'border-radius': '4px',
-              'padding': '2px 8px',
-              'text-align': 'center',
-            },
-            zIndex: 2,
-          });
-          map.add(text);
-          districtPolygonsRef.current.push(text);
-        }
+      })
+      .catch((err) => {
+        console.error('加载行政区划数据失败:', err);
       });
-    });
 
     return () => {
+      cancelled = true;
       districtPolygonsRef.current.forEach((p) => map.remove(p));
       districtPolygonsRef.current = [];
     };

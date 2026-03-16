@@ -20,7 +20,6 @@ export function useAMap(containerId: string) {
         'AMap.Geolocation',
         'AMap.MarkerCluster',
         'AMap.MouseTool',
-        'AMap.DistrictSearch',
       ],
     })
       .then((AMap) => {
