@@ -387,11 +387,6 @@ export function MapView() {
   }, [map, loaded, activeCategories]);
 
   // ======= 山峰图层 =======
-  // 难度星级渲染
-  const renderStars = (n: number, max = 5) => {
-    return '★'.repeat(n) + '☆'.repeat(max - n);
-  };
-
   useEffect(() => {
     if (!map || !loaded) return;
 
@@ -432,14 +427,10 @@ export function MapView() {
             cursor: 'pointer',
           });
           circle.on('click', () => {
-            const difficulty = props.difficulty || 0;
-            const diffColor = difficulty >= 4 ? '#c62828' : difficulty >= 3 ? '#e65100' : '#2E7D32';
             showInfoWindow(AMap, new AMap.LngLat(lon, lat), props.name, `
               <div style="min-width:180px">
                 <div style="font-size:16px;color:${color};font-weight:700;margin-bottom:4px">海拔 ${ele}m</div>
                 ${props.district ? `<div style="font-size:12px;color:#666;margin-bottom:4px">📍 ${props.district}</div>` : ''}
-                ${props.description ? `<div style="font-size:12px;color:#444;margin-bottom:6px;line-height:1.4">${props.description}</div>` : ''}
-                ${difficulty ? `<div style="font-size:12px;margin-bottom:4px">难度 <span style="color:${diffColor}">${renderStars(difficulty)}</span></div>` : ''}
                 ${props.duration ? `<div style="font-size:12px;color:#666">⏱ 参考耗时: ${props.duration}</div>` : ''}
                 ${props.transport ? `<div style="font-size:12px;color:#666">🚇 ${props.transport}</div>` : ''}
                 ${props.has_park ? '<div style="font-size:11px;color:#2E7D32;margin-top:2px">🌿 有配套公园</div>' : ''}
