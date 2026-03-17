@@ -35,16 +35,75 @@ export function MapView() {
   // 数据图层引用
   const parkLayerRef = useRef<any[]>([]);
   const peakLayerRef = useRef<any[]>([]);
+  const trailLayerRef = useRef<any[]>([]);
   // 弹窗引用
   const infoWindowRef = useRef<any>(null);
+
+  // 远足径二级分类 key 列表
+  const TRAIL_SUBS = [
+    'trail:kunpeng', 'trail:fenghuang', 'trail:cuiwei',
+    'trail:yangtaishan', 'trail:maluanshan', 'trail:sanshuixian',
+  ];
+  // 公园二级分类 key 列表
+  const PARK_SUBS = ['park:自然公园', 'park:城市公园', 'park:社区公园'];
 
   const handleToggleCategory = useCallback((key: string) => {
     setActiveCategories((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
+
+      // 点击一级分类：联动全部子分类
+      if (key === 'hiking-trail') {
+        const allActive = TRAIL_SUBS.every((s) => next.has(s));
+        if (allActive) {
+          // 全选中 → 全取消
+          next.delete(key);
+          TRAIL_SUBS.forEach((s) => next.delete(s));
+        } else {
+          // 非全选 → 全选
+          next.add(key);
+          TRAIL_SUBS.forEach((s) => next.add(s));
+        }
+      } else if (key === 'park') {
+        const allActive = PARK_SUBS.every((s) => next.has(s));
+        if (allActive) {
+          next.delete(key);
+          PARK_SUBS.forEach((s) => next.delete(s));
+        } else {
+          next.add(key);
+          PARK_SUBS.forEach((s) => next.add(s));
+        }
+      } else if (key.startsWith('trail:')) {
+        // 点击远足径子分类
+        if (next.has(key)) {
+          next.delete(key);
+        } else {
+          next.add(key);
+        }
+        // 同步一级状态
+        if (TRAIL_SUBS.some((s) => next.has(s))) {
+          next.add('hiking-trail');
+        } else {
+          next.delete('hiking-trail');
+        }
+      } else if (key.startsWith('park:')) {
+        // 点击公园子分类
+        if (next.has(key)) {
+          next.delete(key);
+        } else {
+          next.add(key);
+        }
+        if (PARK_SUBS.some((s) => next.has(s))) {
+          next.add('park');
+        } else {
+          next.delete('park');
+        }
       } else {
-        next.add(key);
+        // 其他一级分类（无子分类）
+        if (next.has(key)) {
+          next.delete(key);
+        } else {
+          next.add(key);
+        }
       }
       return next;
     });
@@ -226,7 +285,13 @@ export function MapView() {
     parkLayerRef.current.forEach((o) => map.remove(o));
     parkLayerRef.current = [];
 
-    if (!activeCategories.has('park')) return;
+    // 检查是否有任意公园子分类激活
+    const activeParkTypes = new Set<string>();
+    if (activeCategories.has('park:自然公园')) activeParkTypes.add('自然公园');
+    if (activeCategories.has('park:城市公园')) activeParkTypes.add('城市公园');
+    if (activeCategories.has('park:社区公园')) activeParkTypes.add('社区公园');
+
+    if (activeParkTypes.size === 0) return;
 
     const AMap = (window as any).AMap;
     let cancelled = false;
@@ -240,7 +305,11 @@ export function MapView() {
         features.forEach((feature: any) => {
           const props = feature.properties;
           const geom = feature.geometry;
-          const parkType = props.park_type || '社区公园';
+          const parkType = props.category || '社区公园';
+
+          // 根据二级分类过滤
+          if (!activeParkTypes.has(parkType)) return;
+
           const color = PARK_COLORS[parkType] || '#1565C0';
           const accuracy = props.accuracy || 'unknown';
 
@@ -269,7 +338,7 @@ export function MapView() {
                 showInfoWindow(AMap, center, props.name, `
                   <div style="font-size:12px;color:#666">
                     ${parkType} · ${props.district || ''}
-                    ${props.area ? `<br>面积: ${props.area}公顷` : ''}
+                    ${props.area_ha ? `<br>面积: ${props.area_ha}公顷` : ''}
                     ${props.address ? `<br>${props.address}` : ''}
                   </div>
                 `);
@@ -298,7 +367,7 @@ export function MapView() {
               showInfoWindow(AMap, new AMap.LngLat(lon, lat), props.name, `
                 <div style="font-size:12px;color:#666">
                   ${parkType} · ${props.district || ''}
-                  ${props.area ? `<br>面积: ${props.area}公顷` : ''}
+                  ${props.area_ha ? `<br>面积: ${props.area_ha}公顷` : ''}
                   ${props.address ? `<br>${props.address}` : ''}
                 </div>
               `);
@@ -395,6 +464,113 @@ export function MapView() {
       cancelled = true;
       peakLayerRef.current.forEach((o) => map.remove(o));
       peakLayerRef.current = [];
+    };
+  }, [map, loaded, activeCategories]);
+
+  // ======= 远足径图层 =======
+  // 远足径颜色配置
+  const TRAIL_COLORS: Record<string, string> = {
+    kunpeng: '#D32F2F',     // 红 — 鲲鹏径（主线）
+    fenghuang: '#FF6F00',   // 橙 — 凤凰径
+    cuiwei: '#2E7D32',      // 绿 — 翠微径
+    yangtaishan: '#1565C0', // 蓝 — 阳台山环线
+    maluanshan: '#7B1FA2',  // 紫 — 马峦山环线
+    sanshuixian: '#00838F', // 青 — 三水线
+  };
+
+  useEffect(() => {
+    if (!map || !loaded) return;
+
+    // 清除旧图层
+    trailLayerRef.current.forEach((o) => map.remove(o));
+    trailLayerRef.current = [];
+
+    // 检查哪些远足径被激活
+    const activeTrails = new Set<string>();
+    if (activeCategories.has('trail:kunpeng')) activeTrails.add('kunpeng');
+    if (activeCategories.has('trail:fenghuang')) activeTrails.add('fenghuang');
+    if (activeCategories.has('trail:cuiwei')) activeTrails.add('cuiwei');
+    if (activeCategories.has('trail:yangtaishan')) activeTrails.add('yangtaishan');
+    if (activeCategories.has('trail:maluanshan')) activeTrails.add('maluanshan');
+    if (activeCategories.has('trail:sanshuixian')) activeTrails.add('sanshuixian');
+
+    if (activeTrails.size === 0) return;
+
+    const AMap = (window as any).AMap;
+    let cancelled = false;
+
+    fetch('/shenzhen-trails.geojson')
+      .then((res) => res.json())
+      .then((geojson: any) => {
+        if (cancelled) return;
+
+        const features = geojson.features || [];
+        features.forEach((feature: any) => {
+          const props = feature.properties;
+          const trailId = props.trail_id;
+
+          if (!activeTrails.has(trailId)) return;
+
+          const color = TRAIL_COLORS[trailId] || '#666';
+          const geom = feature.geometry;
+
+          if (geom.type === 'LineString') {
+            const path = geom.coordinates.map(
+              (c: number[]) => new AMap.LngLat(c[0], c[1])
+            );
+            const polyline = new AMap.Polyline({
+              path,
+              strokeColor: color,
+              strokeWeight: props.is_full ? 4 : 3,
+              strokeOpacity: props.is_full ? 0.9 : 0.7,
+              strokeStyle: props.is_full ? 'solid' : 'solid',
+              lineJoin: 'round',
+              lineCap: 'round',
+              zIndex: 15,
+              cursor: 'pointer',
+            });
+            polyline.on('click', () => {
+              const mid = path[Math.floor(path.length / 2)];
+              showInfoWindow(AMap, mid, props.name, `
+                <div style="font-size:12px;color:#666">
+                  ${props.trail_name} · ${props.segment_name || '全程'}
+                  <br>长度: ${props.length || '—'}km
+                  ${props.duration ? `<br>耗时: ${props.duration}` : ''}
+                  ${props.difficulty ? `<br>难度: ${props.difficulty}` : ''}
+                </div>
+              `);
+            });
+            map.add(polyline);
+            trailLayerRef.current.push(polyline);
+
+            // 全径的起终点标注
+            if (props.is_full && path.length > 0) {
+              const startLabel = new AMap.Text({
+                text: `🚩 ${props.start || '起点'}`,
+                position: path[0],
+                style: {
+                  'font-size': '10px',
+                  'font-weight': '600',
+                  'color': color,
+                  'background': 'rgba(255,255,255,0.9)',
+                  'border': `1px solid ${color}`,
+                  'border-radius': '3px',
+                  'padding': '1px 5px',
+                },
+                zIndex: 16,
+              });
+              map.add(startLabel);
+              trailLayerRef.current.push(startLabel);
+            }
+          }
+        });
+      })
+      .catch((err) => console.error('加载远足径数据失败:', err));
+
+    return () => {
+      cancelled = true;
+      trailLayerRef.current.forEach((o) => map.remove(o));
+      trailLayerRef.current = [];
     };
   }, [map, loaded, activeCategories]);
 

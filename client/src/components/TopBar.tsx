@@ -2,16 +2,39 @@ import { useState } from 'react';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 // 一级分类定义 — 多选叠加
+export interface SubCategory {
+  key: string;
+  label: string;
+}
+
 export interface PrimaryCategory {
   key: string;
   label: string;
   color: string;
+  subs?: SubCategory[];
 }
 
 const PRIMARY_CATEGORIES: PrimaryCategory[] = [
   { key: 'around-shenzhen', label: '环深圳', color: '#D32F2F' },
-  { key: 'hiking-trail', label: '远足径', color: '#2E7D32' },
-  { key: 'park', label: '公园', color: '#1565C0' },
+  {
+    key: 'hiking-trail', label: '远足径', color: '#2E7D32',
+    subs: [
+      { key: 'trail:kunpeng', label: '鲲鹏径' },
+      { key: 'trail:fenghuang', label: '凤凰径' },
+      { key: 'trail:cuiwei', label: '翠微径' },
+      { key: 'trail:yangtaishan', label: '阳台山环线' },
+      { key: 'trail:maluanshan', label: '马峦山环线' },
+      { key: 'trail:sanshuixian', label: '三水线' },
+    ],
+  },
+  {
+    key: 'park', label: '公园', color: '#1565C0',
+    subs: [
+      { key: 'park:自然公园', label: '自然公园' },
+      { key: 'park:城市公园', label: '城市公园' },
+      { key: 'park:社区公园', label: '社区公园' },
+    ],
+  },
   { key: 'peak', label: '山峰', color: '#8B4513' },
 ];
 
@@ -23,6 +46,18 @@ interface TopBarProps {
 export function TopBar({ activeCategories, onToggleCategory }: TopBarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const isMobile = useIsMobile();
+
+  // 判断一级分类是否激活（自身或任一子分类激活）
+  const isPrimaryActive = (cat: PrimaryCategory) => {
+    if (activeCategories.has(cat.key)) return true;
+    if (cat.subs) return cat.subs.some((s) => activeCategories.has(s.key));
+    return false;
+  };
+
+  // 获取当前展开二级菜单的一级分类
+  const expandedCat = PRIMARY_CATEGORIES.find(
+    (cat) => cat.subs && isPrimaryActive(cat)
+  );
 
   if (collapsed) {
     return (
@@ -57,6 +92,7 @@ export function TopBar({ activeCategories, onToggleCategory }: TopBarProps) {
 
   return (
     <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 200 }}>
+      {/* 一级分类行 */}
       <div
         style={{
           background: '#fff',
@@ -65,7 +101,7 @@ export function TopBar({ activeCategories, onToggleCategory }: TopBarProps) {
           display: 'flex',
           alignItems: 'center',
           gap: isMobile ? 8 : 16,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          boxShadow: expandedCat ? 'none' : '0 2px 8px rgba(0,0,0,0.08)',
         }}
       >
         <div
@@ -81,9 +117,9 @@ export function TopBar({ activeCategories, onToggleCategory }: TopBarProps) {
 
         <div style={{ width: 1, height: isMobile ? 20 : 24, background: '#e0e0e0' }} />
 
-        <div style={{ display: 'flex', gap: isMobile ? 6 : 8, flex: 1 }}>
+        <div style={{ display: 'flex', gap: isMobile ? 6 : 8, flex: 1, flexWrap: 'wrap' }}>
           {PRIMARY_CATEGORIES.map((cat) => {
-            const active = activeCategories.has(cat.key);
+            const active = isPrimaryActive(cat);
             return (
               <button
                 key={cat.key}
@@ -125,6 +161,45 @@ export function TopBar({ activeCategories, onToggleCategory }: TopBarProps) {
           ▲
         </button>
       </div>
+
+      {/* 二级分类行 */}
+      {expandedCat && expandedCat.subs && (
+        <div
+          style={{
+            background: '#fafafa',
+            borderBottom: '1px solid #e8e8e8',
+            padding: isMobile ? '6px 12px 6px 56px' : '8px 20px 8px 76px',
+            display: 'flex',
+            gap: isMobile ? 5 : 6,
+            flexWrap: 'wrap',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          }}
+        >
+          {expandedCat.subs.map((sub) => {
+            const active = activeCategories.has(sub.key);
+            return (
+              <button
+                key={sub.key}
+                onClick={() => onToggleCategory(sub.key)}
+                style={{
+                  padding: isMobile ? '3px 10px' : '4px 14px',
+                  borderRadius: 14,
+                  border: `1.5px solid ${active ? expandedCat.color : '#ddd'}`,
+                  background: active ? expandedCat.color + '18' : '#fff',
+                  color: active ? expandedCat.color : '#777',
+                  fontSize: isMobile ? 11 : 12,
+                  fontWeight: active ? 600 : 400,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {sub.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
