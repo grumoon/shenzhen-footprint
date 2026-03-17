@@ -63,7 +63,6 @@ Monorepo 前后端分离：
 |------|------|------|
 | shenzhen-districts.geojson | 行政区边界 | ~74KB |
 | shenzhen-streets.geojson | 街道边界 | ~654KB |
-| shenzhen-communities.geojson | 社区边界 | 已废弃，待删除 |
 | shenzhen-parks.geojson | 公园（1320个） | ~1MB，含自然/城市/社区三类 |
 | shenzhen-peaks.geojson | 山峰（77座） | ~26KB，含海拔/难度/描述等 |
 | shenzhen-trails.geojson | 远足径（36条轨迹） | ~1MB，三径三线 |
