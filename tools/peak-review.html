@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>山峰校对工具 — 全量版</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; }
+#map { width: 100%; height: 100vh; }
+
+/* 顶部面板 */
+.panel {
+  position: absolute; top: 12px; left: 12px; right: 12px;
+  background: rgba(20, 20, 40, 0.95); border-radius: 12px;
+  padding: 16px 20px; z-index: 1000;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+.peak-header {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
+}
+.peak-title {
+  font-size: 22px; font-weight: 700; color: #ff6b6b;
+}
+.peak-ele {
+  font-size: 16px; font-weight: 600; padding: 2px 10px;
+  border-radius: 6px; color: #fff;
+}
+.peak-idx {
+  font-size: 12px; color: #666; margin-left: auto;
+}
+.status-badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600;
+}
+.status-ok { background: #2ecc71; color: #000; }
+.status-moved { background: #0984e3; color: #fff; }
+.status-deleted { background: #d63031; color: #fff; }
+.status-pending { background: #636e72; color: #fff; }
+
+.coords-row {
+  display: flex; gap: 16px; align-items: center;
+  margin-bottom: 6px; font-size: 13px;
+}
+.coord-label { color: #888; min-width: 50px; }
+.coord-value { font-family: 'SF Mono', 'Fira Code', monospace; color: #74b9ff; }
+.coord-value.new { color: #2ecc71; font-weight: 600; }
+.coord-value.none { color: #555; font-style: italic; }
+.distance { color: #ffa502; font-weight: 600; margin-left: 8px; font-size: 12px; }
+
+.mode-hint {
+  font-size: 12px; color: #ffa502; margin: 8px 0;
+  padding: 6px 12px; background: rgba(255,165,2,0.1);
+  border: 1px solid rgba(255,165,2,0.3); border-radius: 6px;
+  display: none;
+}
+.mode-hint.active { display: block; }
+
+.actions {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+}
+.btn {
+  padding: 8px 16px; border: none; border-radius: 6px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: all 0.15s; white-space: nowrap;
+}
+.btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+.btn:active { transform: translateY(0); }
+.btn-ok { background: #2ecc71; color: #000; }
+.btn-move { background: #0984e3; color: #fff; }
+.btn-delete { background: #d63031; color: #fff; }
+.btn-undo { background: #636e72; color: #fff; }
+.btn-export { background: #6c5ce7; color: #fff; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* 底部进度 */
+.progress {
+  position: absolute; bottom: 12px; left: 12px; right: 12px;
+  background: rgba(20, 20, 40, 0.95); border-radius: 12px;
+  padding: 12px 20px; z-index: 1000;
+  backdrop-filter: blur(10px);
+}
+.progress-bar {
+  height: 4px; background: #333; border-radius: 2px; margin-bottom: 8px;
+}
+.progress-fill {
+  height: 100%; background: linear-gradient(90deg, #ff6b6b, #ffa502, #2ecc71);
+  border-radius: 2px; transition: width 0.3s;
+}
+.progress-text {
+  display: flex; justify-content: space-between; font-size: 12px; color: #888;
+}
+.stats {
+  display: flex; gap: 12px; margin-top: 6px; font-size: 11px;
+}
+.stat { display: flex; align-items: center; gap: 4px; }
+.stat-dot { width: 8px; height: 8px; border-radius: 50%; }
+.nav-btns {
+  display: flex; gap: 8px; margin-top: 8px;
+}
+.nav-btn {
+  padding: 6px 14px; border: 1px solid #444; background: transparent;
+  color: #ccc; border-radius: 6px; font-size: 12px; cursor: pointer;
+  flex: 1; text-align: center;
+}
+.nav-btn:hover { background: #333; }
+
+/* 侧边列表 */
+.sidebar {
+  position: absolute; top: 12px; right: 12px; bottom: 80px;
+  width: 240px; z-index: 999;
+  background: rgba(20, 20, 40, 0.95); border-radius: 12px;
+  backdrop-filter: blur(10px); overflow: hidden;
+  display: none; flex-direction: column;
+}
+.sidebar.open { display: flex; }
+.sidebar-header {
+  padding: 12px 16px; border-bottom: 1px solid #333;
+  font-size: 14px; font-weight: 600;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.sidebar-list {
+  flex: 1; overflow-y: auto; padding: 8px;
+}
+.sidebar-item {
+  padding: 6px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; margin-bottom: 2px;
+  display: flex; align-items: center; gap: 6px;
+  transition: background 0.15s;
+}
+.sidebar-item:hover { background: rgba(255,255,255,0.08); }
+.sidebar-item.active { background: rgba(255,107,107,0.2); }
+.sidebar-item.deleted { text-decoration: line-through; color: #666; }
+.sidebar-item .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.sidebar-close {
+  background: none; border: none; color: #888; cursor: pointer; font-size: 16px;
+}
+
+/* 导出结果面板 */
+.export-panel {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(20, 20, 40, 0.98); border-radius: 16px;
+  padding: 24px 32px; z-index: 2000; max-width: 700px; width: 90%;
+  max-height: 80vh; overflow-y: auto;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  display: none;
+}
+.export-panel h2 { margin-bottom: 16px; color: #6c5ce7; }
+.export-summary { font-size: 13px; line-height: 1.8; margin-bottom: 16px; }
+.export-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="panel" id="panel">
+  <div class="peak-header">
+    <span class="peak-title" id="peakName">加载中...</span>
+    <span class="peak-ele" id="peakEle"></span>
+    <span id="statusBadge"></span>
+    <span class="peak-idx" id="peakIdx"></span>
+  </div>
+  <div class="coords-row">
+    <span class="coord-label">坐标:</span>
+    <span class="coord-value" id="curCoord"></span>
+  </div>
+  <div class="coords-row" id="newCoordRow" style="display:none">
+    <span class="coord-label">新坐标:</span>
+    <span class="coord-value new" id="newCoord"></span>
+    <span class="distance" id="distText"></span>
+  </div>
+  <div class="mode-hint" id="modeHint">
+    🎯 <b>选点模式</b>：点击卫星地图上的正确山顶位置，然后点「确认新位置」
+  </div>
+  <div class="actions">
+    <button class="btn btn-ok" id="btnOk" title="位置正确，跳到下一个 (K)">✓ 位置正确</button>
+    <button class="btn btn-move" id="btnMove" title="在地图上重新选点 (M)">📍 重新选点</button>
+    <button class="btn btn-delete" id="btnDelete" title="删除这座山 (D)">✕ 删除</button>
+    <button class="btn btn-move" id="btnConfirmMove" style="display:none">✓ 确认新位置</button>
+    <button class="btn btn-undo" id="btnCancelMove" style="display:none">✕ 取消</button>
+    <button class="btn btn-undo" id="btnUndo" style="display:none" title="撤销操作 (U)">↩ 撤销</button>
+    <button class="btn btn-export" id="btnExport" style="margin-left:auto" title="查看结果并导出">📋 导出</button>
+    <button class="btn btn-undo" id="btnList" style="margin-left:4px" title="显示列表 (L)">☰</button>
+  </div>
+</div>
+
+<div class="progress" id="progress">
+  <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+  <div class="progress-text">
+    <span id="progressLeft"></span>
+    <span id="progressRight"></span>
+  </div>
+  <div class="stats" id="stats"></div>
+  <div class="nav-btns">
+    <button class="nav-btn" id="btnPrev">← 上一个</button>
+    <button class="nav-btn" id="btnNext">下一个 →</button>
+  </div>
+</div>
+
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <span>全部山峰</span>
+    <button class="sidebar-close" id="sidebarClose">✕</button>
+  </div>
+  <div class="sidebar-list" id="sidebarList"></div>
+</div>
+
+<div class="export-panel" id="exportPanel">
+  <h2>📋 校对结果</h2>
+  <div class="export-summary" id="exportSummary"></div>
+  <div class="export-actions">
+    <button class="btn btn-ok" id="btnDownloadGeoJSON">⬇ 下载修改后的 GeoJSON</button>
+    <button class="btn btn-export" id="btnCopySummary">📋 复制摘要</button>
+    <button class="btn btn-undo" id="btnCloseExport">关闭</button>
+  </div>
+</div>
+
+<script>
+// ====== 全局状态 ======
+let geojsonData = null;      // 原始 GeoJSON
+let peaks = [];               // 按海拔排序后的 features
+let currentIdx = 0;
+let isPickMode = false;       // 选点模式
+let pickedLngLat = null;      // 选中的新坐标
+
+// 每个山峰的校对状态: { action: 'ok'|'moved'|'deleted'|null, newCoords?: [lng,lat] }
+let reviewState = {};
+
+let map, curMarker, newPickMarker;
+
+// ====== 高德地图加载 ======
+window._AMapSecurityConfig = {
+  securityJsCode: '200244dac197f79b5ac1455ef655be15',
+};
+
+const script = document.createElement('script');
+script.src = 'https://webapi.amap.com/maps?v=2.0&key=e565943cb0fc8136a0971093ef819748';
+script.onload = () => {
+  // 加载 GeoJSON（本地优先，失败则从线上加载）
+  const GEOJSON_URLS = [
+    '/shenzhen-peaks.geojson',
+    'http://119.29.94.232:3002/shenzhen-peaks.geojson',
+  ];
+
+  (async function loadGeoJSON() {
+    for (const url of GEOJSON_URLS) {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) continue;
+        const data = await r.json();
+        geojsonData = data;
+        peaks = [...data.features].sort((a, b) =>
+          (b.properties.elevation || 0) - (a.properties.elevation || 0)
+        );
+        console.log(`从 ${url} 加载了 ${peaks.length} 座山峰`);
+        initMap();
+        return;
+      } catch (e) {
+        console.warn(`从 ${url} 加载失败:`, e.message);
+      }
+    }
+    alert('加载 GeoJSON 失败！请在项目开发服务器下打开或确保线上服务可用');
+  })();
+};
+document.head.appendChild(script);
+
+function initMap() {
+  const first = peaks[0];
+  const [lng, lat] = first.geometry.coordinates;
+
+  map = new AMap.Map('map', {
+    zoom: 15,
+    center: [lng, lat],
+    mapStyle: 'amap://styles/dark',
+    layers: [
+      new AMap.TileLayer.Satellite(),
+      new AMap.TileLayer.RoadNet({ opacity: 0.5 }),
+    ],
+  });
+
+  // 所有山峰灰色小点（参考）
+  peaks.forEach((peak, i) => {
+    const [pLng, pLat] = peak.geometry.coordinates;
+    const dot = new AMap.CircleMarker({
+      center: [pLng, pLat],
+      radius: 3,
+      fillColor: '#888',
+      fillOpacity: 0.4,
+      strokeWeight: 0,
+      zIndex: 5,
+      cursor: 'pointer',
+    });
+    dot.on('click', () => {
+      if (!isPickMode) showPeak(i);
+    });
+    map.add(dot);
+  });
+
+  map.on('click', onMapClick);
+  showPeak(0);
+  renderSidebar();
+}
+
+function onMapClick(e) {
+  if (!isPickMode) return;
+
+  const lng = e.lnglat.getLng();
+  const lat = e.lnglat.getLat();
+  pickedLngLat = [lng, lat];
+
+  // 新位置标记（绿色十字）
+  if (newPickMarker) map.remove(newPickMarker);
+  newPickMarker = new AMap.Marker({
+    position: [lng, lat],
+    anchor: 'center',
+    content: `<div style="width:28px;height:28px;position:relative">
+      <div style="position:absolute;top:50%;left:0;width:100%;height:2px;background:#2ecc71;transform:translateY(-50%)"></div>
+      <div style="position:absolute;left:50%;top:0;height:100%;width:2px;background:#2ecc71;transform:translateX(-50%)"></div>
+      <div style="position:absolute;top:50%;left:50%;width:10px;height:10px;background:#2ecc71;border-radius:50%;transform:translate(-50%,-50%)"></div>
+    </div>`,
+    zIndex: 200,
+  });
+  map.add(newPickMarker);
+
+  // 更新 UI
+  const row = document.getElementById('newCoordRow');
+  row.style.display = 'flex';
+  document.getElementById('newCoord').textContent = `[${lng.toFixed(6)}, ${lat.toFixed(6)}]`;
+
+  const peak = peaks[currentIdx];
+  const [oLng, oLat] = peak.geometry.coordinates;
+  const dist = calcDistance(oLat, oLng, lat, lng);
+  document.getElementById('distText').textContent = `偏移 ${dist}m`;
+
+  document.getElementById('btnConfirmMove').disabled = false;
+}
+
+// ====== 显示某座山峰 ======
+function showPeak(idx) {
+  if (idx < 0 || idx >= peaks.length) return;
+  exitPickMode();
+  currentIdx = idx;
+  const peak = peaks[idx];
+  const props = peak.properties;
+  const [lng, lat] = peak.geometry.coordinates;
+  const ele = props.elevation;
+  const state = reviewState[idx];
+
+  // 标题
+  document.getElementById('peakName').textContent = props.name;
+  const eleEl = document.getElementById('peakEle');
+  eleEl.textContent = `${ele}m`;
+  eleEl.style.background = getPeakColor(ele);
+  document.getElementById('peakIdx').textContent = `${idx + 1} / ${peaks.length}`;
+
+  // 状态徽章
+  const badge = document.getElementById('statusBadge');
+  if (state) {
+    if (state.action === 'ok') badge.innerHTML = '<span class="status-badge status-ok">✓ 已确认</span>';
+    else if (state.action === 'moved') badge.innerHTML = '<span class="status-badge status-moved">📍 已移动</span>';
+    else if (state.action === 'deleted') badge.innerHTML = '<span class="status-badge status-deleted">✕ 已删除</span>';
+  } else {
+    badge.innerHTML = '<span class="status-badge status-pending">待校对</span>';
+  }
+
+  // 坐标
+  const displayCoords = (state && state.action === 'moved') ? state.newCoords : [lng, lat];
+  document.getElementById('curCoord').textContent = `[${displayCoords[0].toFixed(6)}, ${displayCoords[1].toFixed(6)}]`;
+  document.getElementById('newCoordRow').style.display = 'none';
+
+  // 按钮状态
+  const isDeleted = state && state.action === 'deleted';
+  document.getElementById('btnOk').style.display = isDeleted ? 'none' : '';
+  document.getElementById('btnMove').style.display = isDeleted ? 'none' : '';
+  document.getElementById('btnDelete').style.display = '';
+  document.getElementById('btnDelete').textContent = isDeleted ? '已删除' : '✕ 删除';
+  document.getElementById('btnDelete').disabled = isDeleted;
+  document.getElementById('btnUndo').style.display = state ? '' : 'none';
+
+  document.getElementById('btnConfirmMove').style.display = 'none';
+  document.getElementById('btnCancelMove').style.display = 'none';
+
+  // 地图标记
+  if (curMarker) map.remove(curMarker);
+  if (newPickMarker) map.remove(newPickMarker);
+
+  const markerColor = isDeleted ? '#666' : (state && state.action === 'moved' ? '#2ecc71' : '#ff6b6b');
+  const markerCenter = (state && state.action === 'moved') ? state.newCoords : [lng, lat];
+
+  curMarker = new AMap.Marker({
+    position: markerCenter,
+    anchor: 'center',
+    content: `<div style="width:32px;height:32px;position:relative">
+      <div style="position:absolute;top:50%;left:0;width:100%;height:2px;background:${markerColor};transform:translateY(-50%)"></div>
+      <div style="position:absolute;left:50%;top:0;height:100%;width:2px;background:${markerColor};transform:translateX(-50%)"></div>
+      <div style="position:absolute;top:50%;left:50%;width:12px;height:12px;border:2px solid ${markerColor};border-radius:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.3)"></div>
+    </div>`,
+    zIndex: 100,
+  });
+  map.add(curMarker);
+
+  // 如果是移动过的，也显示原始位置的淡色标记
+  if (state && state.action === 'moved') {
+    // 用一个淡红色标记原来位置
+    const origMarker = new AMap.Marker({
+      position: [lng, lat],
+      anchor: 'center',
+      content: `<div style="width:20px;height:20px;position:relative;opacity:0.5">
+        <div style="position:absolute;top:50%;left:0;width:100%;height:1px;background:#ff4757;transform:translateY(-50%)"></div>
+        <div style="position:absolute;left:50%;top:0;height:100%;width:1px;background:#ff4757;transform:translateX(-50%)"></div>
+      </div>`,
+      zIndex: 90,
+    });
+    map.add(origMarker);
+    // 存一下以便清除（复用 newPickMarker 变量）
+    newPickMarker = origMarker;
+  }
+
+  map.setZoomAndCenter(16, markerCenter);
+  updateProgress();
+  highlightSidebar(idx);
+}
+
+// ====== 选点模式 ======
+function enterPickMode() {
+  isPickMode = true;
+  pickedLngLat = null;
+  document.getElementById('modeHint').classList.add('active');
+  document.getElementById('btnOk').style.display = 'none';
+  document.getElementById('btnMove').style.display = 'none';
+  document.getElementById('btnDelete').style.display = 'none';
+  document.getElementById('btnUndo').style.display = 'none';
+  document.getElementById('btnConfirmMove').style.display = '';
+  document.getElementById('btnConfirmMove').disabled = true;
+  document.getElementById('btnCancelMove').style.display = '';
+  document.getElementById('newCoordRow').style.display = 'none';
+  document.getElementById('distText').textContent = '';
+  map.setDefaultCursor('crosshair');
+}
+
+function exitPickMode() {
+  isPickMode = false;
+  pickedLngLat = null;
+  document.getElementById('modeHint').classList.remove('active');
+  if (newPickMarker) { map.remove(newPickMarker); newPickMarker = null; }
+  map.setDefaultCursor('');
+}
+
+// ====== 按钮事件 ======
+document.getElementById('btnOk').onclick = () => {
+  reviewState[currentIdx] = { action: 'ok' };
+  goNext();
+};
+
+document.getElementById('btnMove').onclick = () => {
+  enterPickMode();
+};
+
+document.getElementById('btnConfirmMove').onclick = () => {
+  if (!pickedLngLat) return;
+  reviewState[currentIdx] = { action: 'moved', newCoords: [...pickedLngLat] };
+  exitPickMode();
+  goNext();
+};
+
+document.getElementById('btnCancelMove').onclick = () => {
+  exitPickMode();
+  showPeak(currentIdx);
+};
+
+document.getElementById('btnDelete').onclick = () => {
+  const name = peaks[currentIdx].properties.name;
+  if (!confirm(`确定删除「${name}」？`)) return;
+  reviewState[currentIdx] = { action: 'deleted' };
+  goNext();
+};
+
+document.getElementById('btnUndo').onclick = () => {
+  delete reviewState[currentIdx];
+  showPeak(currentIdx);
+  renderSidebar();
+};
+
+document.getElementById('btnPrev').onclick = () => showPeak(currentIdx - 1);
+document.getElementById('btnNext').onclick = () => goNext();
+
+document.getElementById('btnList').onclick = () => {
+  const sb = document.getElementById('sidebar');
+  sb.classList.toggle('open');
+};
+document.getElementById('sidebarClose').onclick = () => {
+  document.getElementById('sidebar').classList.remove('open');
+};
+
+function goNext() {
+  renderSidebar();
+  if (currentIdx < peaks.length - 1) {
+    showPeak(currentIdx + 1);
+  } else {
+    showPeak(currentIdx); // 刷新当前
+    updateProgress();
+  }
+}
+
+// ====== 进度 ======
+function updateProgress() {
+  const total = peaks.length;
+  let okCount = 0, movedCount = 0, deletedCount = 0, pendingCount = 0;
+  for (let i = 0; i < total; i++) {
+    const s = reviewState[i];
+    if (!s) pendingCount++;
+    else if (s.action === 'ok') okCount++;
+    else if (s.action === 'moved') movedCount++;
+    else if (s.action === 'deleted') deletedCount++;
+  }
+  const done = okCount + movedCount + deletedCount;
+  const pct = (done / total * 100).toFixed(0);
+
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLeft').textContent = `${currentIdx + 1} / ${total}`;
+  document.getElementById('progressRight').textContent = `已处理 ${done} (${pct}%)`;
+  document.getElementById('stats').innerHTML = `
+    <span class="stat"><span class="stat-dot" style="background:#2ecc71"></span> 确认 ${okCount}</span>
+    <span class="stat"><span class="stat-dot" style="background:#0984e3"></span> 移动 ${movedCount}</span>
+    <span class="stat"><span class="stat-dot" style="background:#d63031"></span> 删除 ${deletedCount}</span>
+    <span class="stat"><span class="stat-dot" style="background:#636e72"></span> 待处理 ${pendingCount}</span>
+  `;
+}
+
+// ====== 侧边列表 ======
+function renderSidebar() {
+  const list = document.getElementById('sidebarList');
+  list.innerHTML = peaks.map((peak, i) => {
+    const s = reviewState[i];
+    const isDeleted = s && s.action === 'deleted';
+    const dotColor = !s ? '#636e72' : s.action === 'ok' ? '#2ecc71' : s.action === 'moved' ? '#0984e3' : '#d63031';
+    const cls = `sidebar-item${i === currentIdx ? ' active' : ''}${isDeleted ? ' deleted' : ''}`;
+    return `<div class="${cls}" data-idx="${i}">
+      <span class="dot" style="background:${dotColor}"></span>
+      <span>${peak.properties.name}</span>
+      <span style="color:#666;margin-left:auto;font-size:11px">${peak.properties.elevation}m</span>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.sidebar-item').forEach(el => {
+    el.onclick = () => showPeak(parseInt(el.dataset.idx));
+  });
+}
+
+function highlightSidebar(idx) {
+  const items = document.querySelectorAll('.sidebar-item');
+  items.forEach((el, i) => el.classList.toggle('active', i === idx));
+  // 滚动到可视
+  const active = document.querySelector('.sidebar-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+// ====== 导出 ======
+document.getElementById('btnExport').onclick = showExport;
+document.getElementById('btnCloseExport').onclick = () => {
+  document.getElementById('exportPanel').style.display = 'none';
+};
+
+function showExport() {
+  const total = peaks.length;
+  let okCount = 0, movedCount = 0, deletedCount = 0, pendingCount = 0;
+  const movedList = [], deletedList = [];
+
+  for (let i = 0; i < total; i++) {
+    const s = reviewState[i];
+    const name = peaks[i].properties.name;
+    const ele = peaks[i].properties.elevation;
+    if (!s) { pendingCount++; continue; }
+    if (s.action === 'ok') okCount++;
+    else if (s.action === 'moved') {
+      movedCount++;
+      const [oLng, oLat] = peaks[i].geometry.coordinates;
+      const dist = calcDistance(oLat, oLng, s.newCoords[1], s.newCoords[0]);
+      movedList.push({ name, ele, oldCoords: [oLng, oLat], newCoords: s.newCoords, dist });
+    }
+    else if (s.action === 'deleted') {
+      deletedCount++;
+      deletedList.push({ name, ele });
+    }
+  }
+
+  let html = `<p>共 <b>${total}</b> 座山峰：`;
+  html += `<span style="color:#2ecc71">✓ 确认 ${okCount}</span> · `;
+  html += `<span style="color:#0984e3">📍 移动 ${movedCount}</span> · `;
+  html += `<span style="color:#d63031">✕ 删除 ${deletedCount}</span> · `;
+  html += `<span style="color:#636e72">待处理 ${pendingCount}</span></p>`;
+
+  if (movedList.length) {
+    html += '<h3 style="color:#0984e3;margin:12px 0 6px">📍 移动的山峰</h3>';
+    movedList.forEach(m => {
+      html += `<div style="font-size:12px;margin:4px 0;line-height:1.6">
+        <b>${m.name}</b> (${m.ele}m) — 偏移 ${m.dist}m<br>
+        <span style="color:#ff6b6b">[${m.oldCoords[0].toFixed(6)}, ${m.oldCoords[1].toFixed(6)}]</span>
+        → <span style="color:#2ecc71">[${m.newCoords[0].toFixed(6)}, ${m.newCoords[1].toFixed(6)}]</span>
+      </div>`;
+    });
+  }
+  if (deletedList.length) {
+    html += '<h3 style="color:#d63031;margin:12px 0 6px">✕ 删除的山峰</h3>';
+    deletedList.forEach(d => {
+      html += `<div style="font-size:12px;margin:2px 0"><b>${d.name}</b> (${d.ele}m)</div>`;
+    });
+  }
+
+  document.getElementById('exportSummary').innerHTML = html;
+  document.getElementById('exportPanel').style.display = 'block';
+}
+
+document.getElementById('btnDownloadGeoJSON').onclick = () => {
+  // 构建修改后的 GeoJSON
+  const newFeatures = [];
+  peaks.forEach((peak, i) => {
+    const s = reviewState[i];
+    if (s && s.action === 'deleted') return; // 跳过删除的
+    const newFeature = JSON.parse(JSON.stringify(peak));
+    if (s && s.action === 'moved') {
+      newFeature.geometry.coordinates = s.newCoords;
+    }
+    newFeatures.push(newFeature);
+  });
+
+  // 按海拔降序排列
+  newFeatures.sort((a, b) => (b.properties.elevation || 0) - (a.properties.elevation || 0));
+
+  const newGeoJSON = {
+    type: 'FeatureCollection',
+    features: newFeatures,
+    metadata: geojsonData.metadata || {
+      title: '深圳山峰数据（增强版）',
+      source: 'OpenStreetMap + 多源整合',
+      coordinate_system: 'GCJ02',
+      generated: new Date().toISOString().split('T')[0],
+    },
+  };
+
+  // 更新 metadata 的 generated 日期
+  newGeoJSON.metadata.generated = new Date().toISOString().split('T')[0];
+
+  const blob = new Blob([JSON.stringify(newGeoJSON, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'shenzhen-peaks.geojson';
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+document.getElementById('btnCopySummary').onclick = () => {
+  let md = '# 山峰校对结果\n\n';
+  const total = peaks.length;
+  let okCount = 0, movedCount = 0, deletedCount = 0;
+  const movedList = [], deletedList = [];
+
+  for (let i = 0; i < total; i++) {
+    const s = reviewState[i];
+    if (!s) continue;
+    if (s.action === 'ok') okCount++;
+    else if (s.action === 'moved') {
+      movedCount++;
+      const [oLng, oLat] = peaks[i].geometry.coordinates;
+      const dist = calcDistance(oLat, oLng, s.newCoords[1], s.newCoords[0]);
+      movedList.push({ name: peaks[i].properties.name, ele: peaks[i].properties.elevation, dist });
+    } else if (s.action === 'deleted') {
+      deletedCount++;
+      deletedList.push(peaks[i].properties.name);
+    }
+  }
+
+  md += `- 确认: ${okCount}\n- 移动: ${movedCount}\n- 删除: ${deletedCount}\n\n`;
+  if (movedList.length) {
+    md += '## 移动\n' + movedList.map(m => `- ${m.name} (${m.ele}m) 偏移 ${m.dist}m`).join('\n') + '\n\n';
+  }
+  if (deletedList.length) {
+    md += '## 删除\n' + deletedList.map(n => `- ${n}`).join('\n') + '\n';
+  }
+
+  navigator.clipboard.writeText(md).then(() => alert('已复制摘要'));
+};
+
+// ====== 工具函数 ======
+function getPeakColor(ele) {
+  if (ele >= 800) return '#c62828';
+  if (ele >= 600) return '#e65100';
+  if (ele >= 400) return '#f9a825';
+  return '#8B4513';
+}
+
+function calcDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+  return Math.round(2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+}
+
+// ====== 键盘快捷键 ======
+document.addEventListener('keydown', e => {
+  if (document.getElementById('exportPanel').style.display === 'block') {
+    if (e.key === 'Escape') document.getElementById('btnCloseExport').click();
+    return;
+  }
+  if (isPickMode) {
+    if (e.key === 'Escape') document.getElementById('btnCancelMove').click();
+    if (e.key === 'Enter' && pickedLngLat) document.getElementById('btnConfirmMove').click();
+    return;
+  }
+  if (e.key === 'ArrowLeft') showPeak(currentIdx - 1);
+  if (e.key === 'ArrowRight') goNext();
+  if (e.key === 'k' || e.key === 'K') document.getElementById('btnOk').click();
+  if (e.key === 'm' || e.key === 'M') document.getElementById('btnMove').click();
+  if (e.key === 'd' || e.key === 'D') document.getElementById('btnDelete').click();
+  if (e.key === 'u' || e.key === 'U') {
+    if (reviewState[currentIdx]) document.getElementById('btnUndo').click();
+  }
+  if (e.key === 'l' || e.key === 'L') document.getElementById('btnList').click();
+});
+</script>
+</body>
+</html>
