@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>深圳最高50座山峰</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+  #map { width: 100%; height: 100vh; }
+  .info-panel {
+    position: absolute; top: 10px; right: 10px; z-index: 1000;
+    background: rgba(255,255,255,0.95); border-radius: 8px;
+    padding: 12px 16px; max-width: 320px; box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    font-size: 13px; max-height: 90vh; overflow-y: auto;
+  }
+  .info-panel h3 { margin: 0 0 8px; font-size: 15px; }
+  .info-panel .stat { color: #666; margin-bottom: 6px; }
+  .peak-list { list-style: none; padding: 0; margin: 8px 0 0; }
+  .peak-list li {
+    padding: 3px 0; border-bottom: 1px solid #eee; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .peak-list li:hover { background: #f0f7ff; }
+  .peak-list .rank { color: #999; width: 24px; text-align: right; margin-right: 6px; font-size: 11px; }
+  .peak-list .name { flex: 1; }
+  .peak-list .ele { color: #d32f2f; font-weight: 600; font-size: 12px; }
+  .top3 .ele { color: #c62828; font-size: 13px; }
+  .legend { margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; }
+  .legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid #fff; box-shadow: 0 0 3px rgba(0,0,0,0.3); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="info-panel" id="panel">
+  <h3>🏔️ 深圳最高50座山峰</h3>
+  <div class="stat">数据来源: OpenStreetMap | 坐标系: WGS84</div>
+  <div class="stat" id="stats"></div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#c62828;width:16px;height:16px;"></div> >800m</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e65100;width:14px;height:14px;"></div> 600-800m</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f9a825;width:12px;height:12px;"></div> 400-600m</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#2e7d32;"></div> <400m</div>
+  </div>
+  <ul class="peak-list" id="peakList"></ul>
+</div>
+
+<script>
+const map = L.map('map').setView([22.60, 114.20], 11);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap',
+  maxZoom: 18
+}).addTo(map);
+
+// 添加地形图层
+L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenTopoMap',
+  maxZoom: 17,
+  opacity: 0.6
+}).addTo(map);
+
+function getColor(ele) {
+  if (ele >= 800) return '#c62828';
+  if (ele >= 600) return '#e65100';
+  if (ele >= 400) return '#f9a825';
+  return '#2e7d32';
+}
+
+function getRadius(ele) {
+  if (ele >= 800) return 10;
+  if (ele >= 600) return 8;
+  if (ele >= 400) return 6;
+  return 5;
+}
+
+fetch('shenzhen_top50_peaks.geojson')
+  .then(r => r.json())
+  .then(data => {
+    const features = data.features;
+    const markers = [];
+    const listEl = document.getElementById('peakList');
+    
+    features.forEach((f, idx) => {
+      const p = f.properties;
+      const [lon, lat] = f.geometry.coordinates;
+      const color = getColor(p.elevation);
+      const radius = getRadius(p.elevation);
+      
+      const marker = L.circleMarker([lat, lon], {
+        radius: radius,
+        fillColor: color,
+        color: '#fff',
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 0.9
+      }).addTo(map);
+      
+      const nameStr = p.name + (p.name_en ? ` (${p.name_en})` : '');
+      marker.bindPopup(`
+        <div style="min-width:160px">
+          <strong style="font-size:14px">#${p.rank} ${nameStr}</strong><br>
+          <span style="color:${color};font-size:18px;font-weight:700">${p.elevation}m</span><br>
+          <span style="color:#666;font-size:12px">坐标: ${lat.toFixed(5)}, ${lon.toFixed(5)}</span>
+        </div>
+      `);
+      
+      // 排名标注（前10名显示）
+      if (idx < 10) {
+        L.marker([lat, lon], {
+          icon: L.divIcon({
+            className: '',
+            html: `<div style="
+              font-size:11px; font-weight:700; color:${color};
+              text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 -1px 0 #fff, 0 1px 0 #fff, -1px 0 0 #fff, 1px 0 0 #fff;
+              white-space:nowrap; transform:translate(8px,-6px);
+            ">${p.name} ${p.elevation}m</div>`,
+            iconSize: [0, 0]
+          })
+        }).addTo(map);
+      }
+      
+      markers.push(marker);
+      
+      // 列表
+      const li = document.createElement('li');
+      li.className = idx < 3 ? 'top3' : '';
+      li.innerHTML = `<span class="rank">${p.rank}</span><span class="name">${p.name}</span><span class="ele">${p.elevation}m</span>`;
+      li.onclick = () => {
+        map.setView([lat, lon], 14);
+        marker.openPopup();
+      };
+      listEl.appendChild(li);
+    });
+    
+    // 统计
+    const eles = features.map(f => f.properties.elevation);
+    document.getElementById('stats').textContent = 
+      `海拔范围: ${Math.min(...eles)}m ~ ${Math.max(...eles)}m`;
+    
+    // 缩放到所有标记
+    const group = L.featureGroup(markers);
+    map.fitBounds(group.getBounds().pad(0.1));
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>深圳公园边界数据预览</title>
+<style>
+  * { margin: 0; padding: 0; }
+  #map { width: 100%; height: 100vh; }
+  .info {
+    position: absolute; top: 10px; left: 10px; z-index: 999;
+    background: rgba(255,255,255,0.95); padding: 12px 16px;
+    border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    font: 13px/1.6 -apple-system, sans-serif; max-width: 320px;
+  }
+  .info h3 { font-size: 15px; margin-bottom: 4px; }
+  .info .stat { color: #666; }
+  .info .legend { margin-top: 8px; }
+  .info .legend span { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 4px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="info">
+  <h3>深圳公园边界 (OSM)</h3>
+  <div class="stat" id="stats">加载中...</div>
+  <div class="legend">
+    <span style="background:rgba(76,175,80,0.5);border:1px solid #4caf50"></span> 有名公园
+    <br>
+    <span style="background:rgba(156,204,101,0.3);border:1px solid #9ccc65"></span> 无名公园
+  </div>
+</div>
+
+<script src="https://webapi.amap.com/maps?v=2.0&key=e565943cb0fc8136a0971093ef819748"></script>
+<script>
+const map = new AMap.Map('map', {
+  zoom: 11,
+  center: [114.05, 22.55],
+  mapStyle: 'amap://styles/light'
+});
+
+fetch('shenzhen_parks_boundary.geojson')
+  .then(r => r.json())
+  .then(data => {
+    const features = data.features;
+    let named = 0, unnamed = 0;
+    
+    features.forEach(feat => {
+      const coords = feat.geometry.coordinates[0];
+      const name = feat.properties.name;
+      const hasName = !!name;
+      
+      if (hasName) named++; else unnamed++;
+      
+      // GeoJSON [lon,lat] -> 高德 [lng,lat]
+      const path = coords.map(c => new AMap.LngLat(c[0], c[1]));
+      
+      const polygon = new AMap.Polygon({
+        path: path,
+        fillColor: hasName ? '#4caf50' : '#9ccc65',
+        fillOpacity: hasName ? 0.4 : 0.2,
+        strokeColor: hasName ? '#2e7d32' : '#689f38',
+        strokeWeight: hasName ? 1.5 : 0.8,
+        strokeOpacity: 0.8,
+      });
+      
+      polygon.on('mouseover', function() {
+        this.setOptions({ fillOpacity: 0.7 });
+        if (name) {
+          new AMap.InfoWindow({
+            content: `<div style="padding:4px 8px;font-size:13px"><b>${name}</b></div>`,
+            offset: new AMap.Pixel(0, -10)
+          }).open(map, polygon.getBounds().getCenter());
+        }
+      });
+      polygon.on('mouseout', function() {
+        this.setOptions({ fillOpacity: hasName ? 0.4 : 0.2 });
+        map.clearInfoWindow();
+      });
+      
+      polygon.setMap(map);
+    });
+    
+    document.getElementById('stats').innerHTML = 
+      `共 <b>${features.length}</b> 个公园多边形<br>` +
+      `有名: ${named} | 无名: ${unnamed}`;
+  });
+</script>
+</body>
+</html>

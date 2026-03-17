@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深圳公园数据预览 v2</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  body { margin: 0; padding: 0; }
+  #map { width: 100vw; height: 100vh; }
+  .legend {
+    background: white; padding: 10px 14px; border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2); font-size: 13px; line-height: 1.8;
+  }
+  .legend h4 { margin: 0 0 6px 0; font-size: 14px; }
+  .legend i { width: 14px; height: 14px; display: inline-block; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+  .stats {
+    position: absolute; top: 10px; left: 50px; z-index: 1000;
+    background: white; padding: 10px 16px; border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2); font-size: 13px;
+  }
+  .filter-panel {
+    position: absolute; top: 10px; right: 10px; z-index: 1000;
+    background: white; padding: 10px 14px; border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2); font-size: 13px;
+  }
+  .filter-panel label { display: block; margin: 4px 0; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="stats" id="stats"></div>
+<div class="filter-panel">
+  <strong>筛选</strong>
+  <label><input type="checkbox" id="showPolygon" checked> 多边形区域</label>
+  <label><input type="checkbox" id="showPoint" checked> 点坐标</label>
+  <hr style="margin:6px 0">
+  <strong>精度</strong>
+  <label><input type="checkbox" class="acc-filter" value="high" checked> 高精度(OSM多边形)</label>
+  <label><input type="checkbox" class="acc-filter" value="medium" checked> 中等(地理编码名)</label>
+  <label><input type="checkbox" class="acc-filter" value="low" checked> 低(地理编码路名)</label>
+  <label><input type="checkbox" class="acc-filter" value="very_low" checked> 很低(区中心编码)</label>
+  <label><input type="checkbox" class="acc-filter" value="district_only" checked> 区中心兜底</label>
+</div>
+
+<script>
+const map = L.map('map').setView([22.6, 114.1], 11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap',
+  maxZoom: 18
+}).addTo(map);
+
+// 颜色方案
+const colors = {
+  '城市公园': '#2196F3',
+  '社区公园': '#4CAF50',
+  '自然公园': '#FF9800',
+  '未分类(OSM)': '#9C27B0',
+};
+const defaultColor = '#607D8B';
+
+const accuracyLabels = {
+  'high': '高精度',
+  'medium': '中等精度',
+  'low': '较低精度',
+  'very_low': '低精度',
+  'district_only': '区中心兜底',
+};
+
+let allLayers = [];
+
+fetch('shenzhen_parks_official_geo.geojson')
+  .then(r => r.json())
+  .then(data => {
+    const stats = {total: 0, polygon: 0, point: 0, categories: {}, accuracy: {}};
+    
+    data.features.forEach(feat => {
+      const props = feat.properties;
+      const cat = props.category || '未分类';
+      const acc = props.accuracy || 'unknown';
+      const color = colors[cat] || defaultColor;
+      const geomType = feat.geometry.type;
+      
+      stats.total++;
+      stats.categories[cat] = (stats.categories[cat] || 0) + 1;
+      stats.accuracy[acc] = (stats.accuracy[acc] || 0) + 1;
+      
+      let layer;
+      if (geomType === 'Polygon' || geomType === 'MultiPolygon') {
+        stats.polygon++;
+        // 注意：GeoJSON坐标是 [lon,lat]，leaflet 需要 [lat,lon]
+        layer = L.geoJSON(feat, {
+          style: { color: color, weight: 1.5, fillColor: color, fillOpacity: 0.3 }
+        });
+      } else {
+        stats.point++;
+        const coords = feat.geometry.coordinates;
+        const radius = acc === 'district_only' ? 3 : (acc === 'very_low' ? 4 : 5);
+        const opacity = acc === 'district_only' ? 0.3 : (acc === 'very_low' ? 0.5 : 0.7);
+        layer = L.circleMarker([coords[1], coords[0]], {
+          radius: radius, color: color, weight: 1,
+          fillColor: color, fillOpacity: opacity
+        });
+      }
+      
+      const popup = `
+        <b>${props.name || '(无名)'}</b><br>
+        类型: ${cat}<br>
+        地址: ${props.address || '-'}<br>
+        面积: ${props.area_ha ? props.area_ha + ' 公顷' : '-'}<br>
+        精度: ${accuracyLabels[acc] || acc}<br>
+        数据: ${geomType === 'Polygon' ? '多边形区域' : '点坐标'}
+        ${props.geocode_method ? '<br>编码方式: ' + props.geocode_method : ''}
+      `;
+      layer.bindPopup(popup);
+      layer.addTo(map);
+      
+      allLayers.push({
+        layer, geomType, accuracy: acc, category: cat
+      });
+    });
+    
+    // 更新统计
+    document.getElementById('stats').innerHTML = `
+      <strong>深圳公园数据</strong> | 
+      总计 <b>${stats.total}</b> 个 | 
+      多边形 <b>${stats.polygon}</b> | 
+      点 <b>${stats.point}</b>
+    `;
+    
+    // 筛选功能
+    function updateFilters() {
+      const showPoly = document.getElementById('showPolygon').checked;
+      const showPt = document.getElementById('showPoint').checked;
+      const accFilters = new Set();
+      document.querySelectorAll('.acc-filter:checked').forEach(cb => accFilters.add(cb.value));
+      
+      allLayers.forEach(({layer, geomType, accuracy}) => {
+        const isPoly = geomType === 'Polygon' || geomType === 'MultiPolygon';
+        const show = (isPoly ? showPoly : showPt) && accFilters.has(accuracy);
+        if (show) {
+          if (!map.hasLayer(layer)) map.addLayer(layer);
+        } else {
+          if (map.hasLayer(layer)) map.removeLayer(layer);
+        }
+      });
+    }
+    
+    document.getElementById('showPolygon').onchange = updateFilters;
+    document.getElementById('showPoint').onchange = updateFilters;
+    document.querySelectorAll('.acc-filter').forEach(cb => cb.onchange = updateFilters);
+  });
+
+// 图例
+const legend = L.control({position: 'bottomright'});
+legend.onAdd = function() {
+  const div = L.DomUtil.create('div', 'legend');
+  div.innerHTML = `
+    <h4>图例</h4>
+    <i style="background:#2196F3"></i> 城市公园 (206)<br>
+    <i style="background:#4CAF50"></i> 社区公园 (1075)<br>
+    <i style="background:#FF9800"></i> 自然公园 (39)<br>
+    <hr style="margin:4px 0">
+    <span style="font-size:11px">● 实心 = 多边形区域</span><br>
+    <span style="font-size:11px">○ 半透明 = 点坐标(精度较低)</span>
+  `;
+  return div;
+};
+legend.addTo(map);
+</script>
+</body>
+</html>

@@ -1,6 +1,30 @@
 import { FastifyInstance } from 'fastify';
-import pool from '../db/index';
-import { ResultSetHeader, RowDataPacket } from 'mysql2';
+import fs from 'fs';
+import path from 'path';
+
+// 数据文件路径
+const DATA_DIR = path.join(__dirname, '../../data');
+const FOOTPRINTS_FILE = path.join(DATA_DIR, 'footprints.json');
+const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
+
+interface Footprint {
+  id: number;
+  name: string;
+  type: 'marker' | 'polyline' | 'polygon';
+  category: string;
+  geometry: object;
+  description?: string;
+  photos?: string[];
+  status: 'visited' | 'want' | 'collected';
+  visit_date?: string;
+  rating?: number;
+  tags?: string[];
+  color: string;
+  icon?: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
 
 interface FootprintBody {
   name: string;
@@ -25,121 +49,156 @@ interface FootprintQuery {
   keyword?: string;
 }
 
+// ---- JSON 文件读写工具 ----
+
+function readFootprints(): Footprint[] {
+  try {
+    const raw = fs.readFileSync(FOOTPRINTS_FILE, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function writeFootprints(data: Footprint[]): void {
+  fs.writeFileSync(FOOTPRINTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function readCategories(): any[] {
+  try {
+    const raw = fs.readFileSync(CATEGORIES_FILE, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function nextId(items: { id: number }[]): number {
+  if (items.length === 0) return 1;
+  return Math.max(...items.map((i) => i.id)) + 1;
+}
+
+// ---- 路由 ----
+
 export async function footprintRoutes(app: FastifyInstance) {
   // 获取所有足迹
-  app.get<{ Querystring: FootprintQuery }>('/api/footprints', async (request, reply) => {
+  app.get<{ Querystring: FootprintQuery }>('/api/footprints', async (request) => {
     const { type, category, status, keyword } = request.query;
-    
-    let sql = 'SELECT * FROM footprints WHERE 1=1';
-    const params: any[] = [];
+    let rows = readFootprints();
 
-    if (type) {
-      sql += ' AND type = ?';
-      params.push(type);
-    }
-    if (category) {
-      sql += ' AND category = ?';
-      params.push(category);
-    }
-    if (status) {
-      sql += ' AND status = ?';
-      params.push(status);
-    }
+    if (type) rows = rows.filter((r) => r.type === type);
+    if (category) rows = rows.filter((r) => r.category === category);
+    if (status) rows = rows.filter((r) => r.status === status);
     if (keyword) {
-      sql += ' AND (name LIKE ? OR description LIKE ?)';
-      params.push(`%${keyword}%`, `%${keyword}%`);
+      const kw = keyword.toLowerCase();
+      rows = rows.filter(
+        (r) =>
+          r.name.toLowerCase().includes(kw) ||
+          (r.description && r.description.toLowerCase().includes(kw))
+      );
     }
 
-    sql += ' ORDER BY sort_order ASC, updated_at DESC';
+    // 排序：sort_order ASC, updated_at DESC
+    rows.sort((a, b) => {
+      if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    });
 
-    const [rows] = await pool.query<RowDataPacket[]>(sql, params);
     return { code: 0, data: rows };
   });
 
   // 获取单个足迹
   app.get<{ Params: { id: string } }>('/api/footprints/:id', async (request, reply) => {
-    const { id } = request.params;
-    const [rows] = await pool.query<RowDataPacket[]>(
-      'SELECT * FROM footprints WHERE id = ?',
-      [id]
-    );
-    if (rows.length === 0) {
+    const id = Number(request.params.id);
+    const rows = readFootprints();
+    const item = rows.find((r) => r.id === id);
+    if (!item) {
       return reply.code(404).send({ code: 1, message: '未找到' });
     }
-    return { code: 0, data: rows[0] };
+    return { code: 0, data: item };
   });
 
   // 创建足迹
-  app.post<{ Body: FootprintBody }>('/api/footprints', async (request, reply) => {
+  app.post<{ Body: FootprintBody }>('/api/footprints', async (request) => {
     const body = request.body;
-    const [result] = await pool.query<ResultSetHeader>(
-      `INSERT INTO footprints (name, type, category, geometry, description, photos, status, visit_date, rating, tags, color, icon, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        body.name,
-        body.type || 'marker',
-        body.category || '其他',
-        JSON.stringify(body.geometry),
-        body.description || null,
-        body.photos ? JSON.stringify(body.photos) : null,
-        body.status || 'collected',
-        body.visit_date || null,
-        body.rating || null,
-        body.tags ? JSON.stringify(body.tags) : null,
-        body.color || '#1677ff',
-        body.icon || null,
-        body.sort_order || 0,
-      ]
-    );
-    return { code: 0, data: { id: result.insertId }, message: '创建成功' };
+    const rows = readFootprints();
+    const now = new Date().toISOString();
+
+    const newItem: Footprint = {
+      id: nextId(rows),
+      name: body.name,
+      type: body.type || 'marker',
+      category: body.category || '其他',
+      geometry: body.geometry,
+      description: body.description || undefined,
+      photos: body.photos || undefined,
+      status: body.status || 'collected',
+      visit_date: body.visit_date || undefined,
+      rating: body.rating || undefined,
+      tags: body.tags || undefined,
+      color: body.color || '#1677ff',
+      icon: body.icon || undefined,
+      sort_order: body.sort_order || 0,
+      created_at: now,
+      updated_at: now,
+    };
+
+    rows.push(newItem);
+    writeFootprints(rows);
+    return { code: 0, data: { id: newItem.id }, message: '创建成功' };
   });
 
   // 更新足迹
   app.put<{ Params: { id: string }; Body: Partial<FootprintBody> }>(
     '/api/footprints/:id',
     async (request, reply) => {
-      const { id } = request.params;
+      const id = Number(request.params.id);
       const body = request.body;
+      const rows = readFootprints();
+      const idx = rows.findIndex((r) => r.id === id);
 
-      const fields: string[] = [];
-      const values: any[] = [];
+      if (idx === -1) {
+        return reply.code(404).send({ code: 1, message: '未找到' });
+      }
 
-      if (body.name !== undefined) { fields.push('name = ?'); values.push(body.name); }
-      if (body.type !== undefined) { fields.push('type = ?'); values.push(body.type); }
-      if (body.category !== undefined) { fields.push('category = ?'); values.push(body.category); }
-      if (body.geometry !== undefined) { fields.push('geometry = ?'); values.push(JSON.stringify(body.geometry)); }
-      if (body.description !== undefined) { fields.push('description = ?'); values.push(body.description); }
-      if (body.photos !== undefined) { fields.push('photos = ?'); values.push(JSON.stringify(body.photos)); }
-      if (body.status !== undefined) { fields.push('status = ?'); values.push(body.status); }
-      if (body.visit_date !== undefined) { fields.push('visit_date = ?'); values.push(body.visit_date); }
-      if (body.rating !== undefined) { fields.push('rating = ?'); values.push(body.rating); }
-      if (body.tags !== undefined) { fields.push('tags = ?'); values.push(JSON.stringify(body.tags)); }
-      if (body.color !== undefined) { fields.push('color = ?'); values.push(body.color); }
-      if (body.icon !== undefined) { fields.push('icon = ?'); values.push(body.icon); }
-      if (body.sort_order !== undefined) { fields.push('sort_order = ?'); values.push(body.sort_order); }
+      // 动态更新字段
+      const updatableFields = [
+        'name', 'type', 'category', 'geometry', 'description',
+        'photos', 'status', 'visit_date', 'rating', 'tags',
+        'color', 'icon', 'sort_order',
+      ] as const;
 
-      if (fields.length === 0) {
+      let changed = false;
+      for (const field of updatableFields) {
+        if ((body as any)[field] !== undefined) {
+          (rows[idx] as any)[field] = (body as any)[field];
+          changed = true;
+        }
+      }
+
+      if (!changed) {
         return reply.code(400).send({ code: 1, message: '没有要更新的字段' });
       }
 
-      values.push(id);
-      await pool.query(`UPDATE footprints SET ${fields.join(', ')} WHERE id = ?`, values);
+      rows[idx].updated_at = new Date().toISOString();
+      writeFootprints(rows);
       return { code: 0, message: '更新成功' };
     }
   );
 
   // 删除足迹
-  app.delete<{ Params: { id: string } }>('/api/footprints/:id', async (request, reply) => {
-    const { id } = request.params;
-    await pool.query('DELETE FROM footprints WHERE id = ?', [id]);
+  app.delete<{ Params: { id: string } }>('/api/footprints/:id', async (request) => {
+    const id = Number(request.params.id);
+    let rows = readFootprints();
+    rows = rows.filter((r) => r.id !== id);
+    writeFootprints(rows);
     return { code: 0, message: '删除成功' };
   });
 
   // 获取所有分类
   app.get('/api/categories', async () => {
-    const [rows] = await pool.query<RowDataPacket[]>(
-      'SELECT * FROM categories ORDER BY sort_order ASC'
-    );
+    const rows = readCategories();
+    rows.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0));
     return { code: 0, data: rows };
   });
 }

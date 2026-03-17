@@ -387,6 +387,11 @@ export function MapView() {
   }, [map, loaded, activeCategories]);
 
   // ======= 山峰图层 =======
+  // 难度星级渲染
+  const renderStars = (n: number, max = 5) => {
+    return '★'.repeat(n) + '☆'.repeat(max - n);
+  };
+
   useEffect(() => {
     if (!map || !loaded) return;
 
@@ -410,6 +415,8 @@ export function MapView() {
           const [lon, lat] = feature.geometry.coordinates;
           const ele = props.elevation;
           const color = getPeakColor(ele);
+          const isFamous = props.famous;
+          // 圆点半径：按海拔分级
           const radius = ele >= 800 ? 8 : ele >= 600 ? 6 : ele >= 400 ? 5 : 4;
 
           // 山峰圆点
@@ -417,45 +424,54 @@ export function MapView() {
             center: new AMap.LngLat(lon, lat),
             radius,
             fillColor: color,
-            fillOpacity: 0.9,
+            fillOpacity: isFamous ? 0.95 : 0.85,
             strokeColor: '#fff',
-            strokeWeight: 2,
+            strokeWeight: isFamous ? 2.5 : 1.5,
             strokeOpacity: 1,
             zIndex: 20,
             cursor: 'pointer',
           });
           circle.on('click', () => {
+            const difficulty = props.difficulty || 0;
+            const diffColor = difficulty >= 4 ? '#c62828' : difficulty >= 3 ? '#e65100' : '#2E7D32';
             showInfoWindow(AMap, new AMap.LngLat(lon, lat), props.name, `
-              <div style="font-size:14px;color:${color};font-weight:700">${ele}m</div>
-              <div style="font-size:12px;color:#666">
-                排名: #${props.rank}
-                ${props.name_en ? `<br>${props.name_en}` : ''}
+              <div style="min-width:180px">
+                <div style="font-size:16px;color:${color};font-weight:700;margin-bottom:4px">海拔 ${ele}m</div>
+                ${props.district ? `<div style="font-size:12px;color:#666;margin-bottom:4px">📍 ${props.district}</div>` : ''}
+                ${props.description ? `<div style="font-size:12px;color:#444;margin-bottom:6px;line-height:1.4">${props.description}</div>` : ''}
+                ${difficulty ? `<div style="font-size:12px;margin-bottom:4px">难度 <span style="color:${diffColor}">${renderStars(difficulty)}</span></div>` : ''}
+                ${props.duration ? `<div style="font-size:12px;color:#666">⏱ 参考耗时: ${props.duration}</div>` : ''}
+                ${props.transport ? `<div style="font-size:12px;color:#666">🚇 ${props.transport}</div>` : ''}
+                ${props.has_park ? '<div style="font-size:11px;color:#2E7D32;margin-top:2px">🌿 有配套公园</div>' : ''}
               </div>
             `);
           });
           map.add(circle);
           peakLayerRef.current.push(circle);
 
-          // 前10名显示名字标注
-          if (props.rank <= 10) {
-            const label = new AMap.Text({
-              text: `${props.name} ${ele}m`,
-              position: new AMap.LngLat(lon, lat),
-              offset: new AMap.Pixel(10, -8),
-              style: {
-                'font-size': '11px',
-                'font-weight': '700',
-                'color': color,
-                'background': 'rgba(255,255,255,0.9)',
-                'border': `1px solid ${color}`,
-                'border-radius': '3px',
-                'padding': '1px 5px',
-              },
-              zIndex: 21,
-            });
-            map.add(label);
-            peakLayerRef.current.push(label);
-          }
+          // 标注文字：知名山峰显示大字
+          const isHighlight = isFamous;
+          const fontSize = isHighlight ? '11px' : '10px';
+          const fontWeight = isHighlight ? '700' : '500';
+          const bgOpacity = isHighlight ? 0.92 : 0.8;
+          const label = new AMap.Text({
+            text: `${props.name} ${ele}m`,
+            position: new AMap.LngLat(lon, lat),
+            offset: new AMap.Pixel(10, -8),
+            style: {
+              'font-size': fontSize,
+              'font-weight': fontWeight,
+              'color': color,
+              'background': `rgba(255,255,255,${bgOpacity})`,
+              'border': `1px solid ${color}${isHighlight ? '' : '60'}`,
+              'border-radius': '3px',
+              'padding': '1px 5px',
+              'white-space': 'nowrap',
+            },
+            zIndex: isHighlight ? 22 : 21,
+          });
+          map.add(label);
+          peakLayerRef.current.push(label);
         });
       })
       .catch((err) => console.error('加载山峰数据失败:', err));
@@ -499,6 +515,16 @@ export function MapView() {
     const AMap = (window as any).AMap;
     let cancelled = false;
 
+    // 有分段数据的三径 ID
+    const HAS_SEGMENTS = new Set(['kunpeng', 'fenghuang', 'cuiwei']);
+
+    // 分段颜色：奇偶段用不同透明度/粗细区分
+    const segmentStyle = (segment: number) => ({
+      strokeOpacity: segment % 2 === 1 ? 0.95 : 0.7,
+      strokeWeight: segment % 2 === 1 ? 4 : 3,
+      strokeStyle: 'solid' as const,
+    });
+
     fetch('/shenzhen-trails.geojson')
       .then((res) => res.json())
       .then((geojson: any) => {
@@ -511,6 +537,9 @@ export function MapView() {
 
           if (!activeTrails.has(trailId)) return;
 
+          // 三径：跳过全径，只显示分段
+          if (HAS_SEGMENTS.has(trailId) && props.is_full) return;
+
           const color = TRAIL_COLORS[trailId] || '#666';
           const geom = feature.geometry;
 
@@ -518,12 +547,18 @@ export function MapView() {
             const path = geom.coordinates.map(
               (c: number[]) => new AMap.LngLat(c[0], c[1])
             );
+
+            const isSegment = !props.is_full && props.segment;
+            const style = isSegment
+              ? segmentStyle(props.segment)
+              : { strokeOpacity: 0.9, strokeWeight: 4, strokeStyle: 'solid' as const };
+
             const polyline = new AMap.Polyline({
               path,
               strokeColor: color,
-              strokeWeight: props.is_full ? 4 : 3,
-              strokeOpacity: props.is_full ? 0.9 : 0.7,
-              strokeStyle: props.is_full ? 'solid' : 'solid',
+              strokeWeight: style.strokeWeight,
+              strokeOpacity: style.strokeOpacity,
+              strokeStyle: style.strokeStyle,
               lineJoin: 'round',
               lineCap: 'round',
               zIndex: 15,
@@ -531,19 +566,46 @@ export function MapView() {
             });
             polyline.on('click', () => {
               const mid = path[Math.floor(path.length / 2)];
+              const segInfo = isSegment
+                ? `第${props.segment}段 · ${props.segment_name}`
+                : (props.segment_name || '全程');
               showInfoWindow(AMap, mid, props.name, `
                 <div style="font-size:12px;color:#666">
-                  ${props.trail_name} · ${props.segment_name || '全程'}
+                  <b>${props.trail_name}</b> · ${segInfo}
                   <br>长度: ${props.length || '—'}km
                   ${props.duration ? `<br>耗时: ${props.duration}` : ''}
                   ${props.difficulty ? `<br>难度: ${props.difficulty}` : ''}
+                  ${props.start ? `<br>起点: ${props.start}` : ''}
+                  ${props.end ? `<br>终点: ${props.end}` : ''}
                 </div>
               `);
             });
             map.add(polyline);
             trailLayerRef.current.push(polyline);
 
-            // 全径的起终点标注
+            // 分段：在中点标注段号和名称
+            if (isSegment && path.length > 0) {
+              const midIdx = Math.floor(path.length / 2);
+              const segLabel = new AMap.Text({
+                text: `${props.segment}. ${props.segment_name}`,
+                position: path[midIdx],
+                style: {
+                  'font-size': '10px',
+                  'font-weight': '500',
+                  'color': color,
+                  'background': 'rgba(255,255,255,0.85)',
+                  'border': `1px solid ${color}40`,
+                  'border-radius': '3px',
+                  'padding': '1px 4px',
+                  'white-space': 'nowrap',
+                },
+                zIndex: 16,
+              });
+              map.add(segLabel);
+              trailLayerRef.current.push(segLabel);
+            }
+
+            // 三线（无分段）的起终点标注
             if (props.is_full && path.length > 0) {
               const startLabel = new AMap.Text({
                 text: `🚩 ${props.start || '起点'}`,
