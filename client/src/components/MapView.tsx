@@ -428,12 +428,8 @@ export function MapView() {
           });
           circle.on('click', () => {
             showInfoWindow(AMap, new AMap.LngLat(lon, lat), props.name, `
-              <div style="min-width:180px">
-                <div style="font-size:16px;color:${color};font-weight:700;margin-bottom:4px">海拔 ${ele}m</div>
-                ${props.district ? `<div style="font-size:12px;color:#666;margin-bottom:4px">📍 ${props.district}</div>` : ''}
-                ${props.duration ? `<div style="font-size:12px;color:#666">⏱ 参考耗时: ${props.duration}</div>` : ''}
-                ${props.transport ? `<div style="font-size:12px;color:#666">🚇 ${props.transport}</div>` : ''}
-                ${props.has_park ? '<div style="font-size:11px;color:#2E7D32;margin-top:2px">🌿 有配套公园</div>' : ''}
+              <div style="min-width:120px">
+                <div style="font-size:16px;color:${color};font-weight:700">海拔 ${ele}m</div>
               </div>
             `);
           });
